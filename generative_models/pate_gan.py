@@ -54,7 +54,7 @@ class PATEGAN(GenerativeModel):
 
         # Configure device
         device_name = tf.test.gpu_device_name()
-        if device_name is '':
+        if device_name == '':
             self.device_spec = tf.DeviceSpec(device_type='CPU', device_index=0)
         else:
             self.device_spec = tf.DeviceSpec(device_type='GPU', device_index=0)

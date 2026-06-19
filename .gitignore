@@ -1,4 +1,4 @@
-venv*
+.venv*
 outputs/*
 .idea/*
 spring_synthetic_data.iml

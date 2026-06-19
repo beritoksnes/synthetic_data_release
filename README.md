@@ -22,7 +22,7 @@ The module `generative_models` so far includes:
 
 ## Docker Distribution
 
-For your convenience, Synthetic Data is also distributed as a ready-to-use Docker image containing Python 3.9 and CUDA 11.4.2, along with all dependencies required by Synthetic Data, including jupyter notebook to visualise and analyse the results.
+For your convenience, Synthetic Data is also distributed as a ready-to-use Docker image containing Python 3.9 and CUDA 11.4.2, along with all dependencies required by Synthetic Data, including jupyter notebook to visualize and analyse the results.
 
 **Note:** This distribution includes CUDA binaries, before downloading the image, ensure to read [its EULA](https://docs.nvidia.com/cuda/eula/index.html) and to agree to its terms.
 
@@ -49,41 +49,74 @@ and opening the notebook with your favourite web browser at the url `http://127.
 ## Direct Installation
 
 ### Requirements
-The framework and its building blocks have been developed and tested under Python 3.9 .
+The framework and its building blocks have been developed and tested under Python 3.9.
 
-We recommend to create a virtual environment for installing all dependencies and running the code
+We recommend creating a virtual environment for installing all dependencies and running the code:
 ```
-python3 -m venv pyvenv3
-source pyvenv3/bin/activate
-pip install numpy==1.19.5 && pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Note: Some people encountered problems due to the API of Numpy having changed between versions, to ensure all dependencies are compiled against the same Numpy version, it needs to be installed first.
+> **Note (fork-specific):** The original README installs numpy separately before other dependencies due to API compatibility issues. In this fork, `requirements.txt` has been updated with fully pinned versions that install correctly in one step. See [Known Issues](#known-issues) if you encounter problems.
 
 ### Dependencies
-The `CTGAN` model depends on a fork of the original model training algorithm that can be found here
-[CTGAN-SPRING](https://github.com/spring-epfl/CTGAN.git)
+The `CTGAN` model depends on the original CTGAN package from [sdv-dev/CTGAN](https://github.com/sdv-dev/CTGAN).
 
-To install the correct version clone the repository above and run
-```
-cd CTGAN
-make install
-```
+> **Note (fork-specific):** The original README references a spring-epfl fork of CTGAN. This fork uses the upstream sdv-dev CTGAN instead, with manual fixes to `setup.py` to resolve version conflicts.
 
-Add the path to this directory to your python path. You can also add this line
-in your shell configuration file (e.g., `~/.bashrc`) to load it automatically.
+Clone and install CTGAN in editable mode:
 ```bash
-# Execute this in the CTGAN folder, otherwise replace `pwd` with the actual path
-export PYTHONPATH=$PYTHONPATH:`pwd`
+git clone https://github.com/sdv-dev/CTGAN
+cd CTGAN
 ```
 
-To test your installation try to run
+Before installing, edit `setup.py` to fix two version conflicts:
+- Relax the `scikit-learn` upper bound from `<0.23` to `<0.25`
+- Pin `torchvision` to `==0.10.1` (required for compatibility with `torch==1.9.1`)
+
+Then install:
+```bash
+pip install torchvision==0.10.1
+pip install -e . --no-deps
 ```
+
+To test your installation, run from within your virtualenv:
+```python
 import ctgan
 ```
-from within your virtualenv `python`
+
+### Known Issues
+
+The following issues were encountered during setup on Python 3.9 without Docker and are resolved in this fork's `requirements.txt`.
+
+**protobuf / TensorFlow import error**
+TensorFlow 2.6.2 is incompatible with newer protobuf versions. Fixed by pinning:
+```
+protobuf==3.20.3
+```
+
+**`%matplotlib inline` fails in notebook**
+Caused by a mismatch between `matplotlib==3.4.3` and a newer `matplotlib-inline`. Fixed by pinning:
+```
+matplotlib-inline==0.1.3
+```
+
+**`No module named 'pkg_resources'`**
+Caused by a broken `setuptools` installation. Fixed by running:
+```bash
+pip install --force-reinstall setuptools
+```
+
+**Harmless warnings (safe to ignore)**
+- `libcudart.so.11.0: cannot open shared object file` — no GPU available, CPU fallback is used automatically
+- `disable_resource_variables ... deprecated` — TF 2.6 compatibility shim, does not affect results
+- `ctgan has requirement pandas<0.26` — CTGAN's pandas pin is an old artifact; 1.3.5 works fine
+- `tensorflow requires typing-extensions~=3.7.4` — does not cause issues in practice with 4.x
 
 # Example runs
+
+## Membership Inference Attack (MIA)
 To run a privacy evaluation with respect to the privacy concern of linkability you can run
 
 ```
@@ -91,9 +124,8 @@ python3 linkage_cli.py -D data/texas -RC tests/linkage/runconfig.json -O tests/l
 ```
 
 The results file produced after successfully running the script will be written to `tests/linkage` and can be parsed with the function `load_results_linkage` provided in `utils/analyse_results.py`. 
-A jupyter notebook to visualise and analyse the results is included at `notebooks/Analyse Results.ipynb`.
 
-
+## Attribute Inference Attack (AIA)
 To run a privacy evaluation with respect to the privacy concern of inference you can run
 
 ```
@@ -101,9 +133,9 @@ python3 inference_cli.py -D data/texas -RC tests/inference/runconfig.json -O tes
 ```
 
 The results file produced after successfully running the script can be parsed with the function `load_results_inference` provided in `utils/analyse_results.py`.
-A jupyter notebook to visualise and analyse the results is included at `notebooks/Analyse Results.ipynb`.
 
 
+## Utility evaluation
 To run a utility evaluation with respect to a simple classification task as utility function run
 
 ```
@@ -112,3 +144,6 @@ python3 utility_cli.py -D data/texas -RC tests/utility/runconfig.json -O tests/u
 
 The results file produced after successfully running the script can be parsed with the function `load_results_utility` provided in `utils/analyse_results.py`.
 
+## Visualizing results
+
+A jupyter notebook to visualize and analyse the results is included at `notebooks/Analyse Results.ipynb`.
