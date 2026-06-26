@@ -149,7 +149,7 @@ def load_results_inference(dirname, dpath):
                 advS = get_ai_advantage(pCorrectSIn, pCorrectSOut)
 
 
-                resAdv.append(gameParams + (gm, pCorrectRIn, pCorrectROut, advR, pCorrectSIn, pCorrectSOut, advS))
+                resAdv.append(gameParams + (gm[0], pCorrectRIn, pCorrectROut, advR, pCorrectSIn, pCorrectSOut, advS))
 
 
     resAdv = DataFrame(resAdv)
