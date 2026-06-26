@@ -1,21 +1,37 @@
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from pandas import DataFrame
 
 from utils.logging import LOGGER
 
 from generative_models.generative_model import GenerativeModel
-from ctgan import CTGANSynthesizer
+
+from sdv.single_table import CTGANSynthesizer
+from sdv.metadata import SingleTableMetadata
+
 
 
 class CTGAN(GenerativeModel):
     """A conditional generative adversarial network for tabular data"""
-    def __init__(self, metadata,
-                 embedding_dim=128, gen_dim=(256, 256),
-                 dis_dim=(256, 256), l2scale=1e-6,
-                 batch_size=500, epochs=300,
+    def __init__(self, 
+                 metadata,
+                 embedding_dim=128, 
+                 gen_dim=(256, 256),
+                 dis_dim=(256, 256), 
+                 l2scale=1e-6,
+                 batch_size=500, 
+                 epochs=300,
                  multiprocess=False):
 
-        self.synthesiser = CTGANSynthesizer(embedding_dim, gen_dim, dis_dim,
-                                            l2scale, batch_size, epochs)
+        self.synthesiser = CTGANSynthesizer(embedding_dim, 
+                                            gen_dim, 
+                                            dis_dim,
+                                            l2scale, 
+                                            batch_size, 
+                                            epochs)
 
         self.metadata = metadata
         self.datatype = DataFrame
