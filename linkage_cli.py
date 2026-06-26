@@ -7,7 +7,7 @@ import json
 from os import mkdir, path
 from numpy.random import choice, seed
 from argparse import ArgumentParser
-from pandas import DataFrame
+from pandas import DataFrame, concat
 
 from utils.datagen import load_s3_data_as_df, load_local_data_as_df
 from utils.utils import json_numpy_serialzer
@@ -20,7 +20,7 @@ from feature_sets.bayes import CorrelationsFeatureSet
 
 from sanitisation_techniques.sanitiser import SanitiserNHS
 
-from generative_models.ctgan import CTGAN
+# from generative_models.ctgan import CTGAN (does not work ...)
 from generative_models.pate_gan import PATEGAN
 from generative_models.data_synthesiser import (IndependentHistogram,
                                                 BayesianNet,
@@ -200,7 +200,7 @@ def main():
                 target = targets.loc[[tid]]
                 resultsTargetPrivacy[tid][f'{GenModel.__name__}'][nr] = {}
 
-                rawTin = rawTout.append(target)
+                rawTin = concat([rawTout, target], ignore_index=True)
                 GenModel.fit(rawTin)
                 synTwithTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
                 synLabelsIn = [LABEL_IN for _ in range(runconfig['nSynT'])]
@@ -232,7 +232,7 @@ def main():
                 target = targets.loc[[tid]]
                 resultsTargetPrivacy[tid][San.__name__][nr] = {}
 
-                rawTin = rawTout.append(target)
+                rawTin = concat([rawTout, target], ignore_index=True)
                 sanIn = San.sanitise(rawTin)
 
                 sanT = [sanOut, sanIn]

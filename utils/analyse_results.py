@@ -7,6 +7,18 @@ from pandas import DataFrame, concat
 from itertools import cycle
 from os import path
 
+# Register the removed option so seaborn 0.11.x doesn't crash
+import pandas._config.config as _pandas_config
+
+try:
+    _pandas_config.register_option(
+        "mode.use_inf_as_null", 
+        False, 
+        "Deprecated, use mode.use_inf_as_na instead"
+    )
+except _pandas_config.OptionError:
+    pass  # Already registered, fine
+
 from warnings import filterwarnings
 filterwarnings('ignore')
 
@@ -107,7 +119,6 @@ def load_results_inference(dirname, dpath):
 
                 for gm, gdict in sdict.items():
                     for nr, res in gdict.items():
-
                         resDF = DataFrame(res)
                         resDF['TargetID'] = tid
                         resDF['TargetSecret'] = tsecret
@@ -158,7 +169,6 @@ def load_results_inference(dirname, dpath):
                       'ProbCorrectSynIn', 'ProbCorrectSynOut', 'AdvantageSyn']
 
     resAdv['PrivacyGain'] = resAdv['AdvantageRaw'] - resAdv['AdvantageSyn']
-
     return resAdv
 
 
@@ -270,16 +280,18 @@ def plt_avg_accuracy(results, models):
 
 
 def pointplot(data, x, y, hue, ax, order):
-    ncats = data[hue].nunique()
+    ncats = int(data[[hue]].nunique())
     huemarkers = HUEMARKERS[:ncats]
 
     sns.pointplot(data=data, y=y,
-                  x=x, hue=hue,
-                  order=order,
-                  ax=ax, dodge=True,
-                  join=False, markers=huemarkers,
-                  scale=1.2, errwidth=2,
-                  linestyles='--')
+              x=x, hue=hue,
+              order=order,
+              ax=ax, dodge=True,
+              join=False,
+            #   markers=huemarkers,
+              scale=1.2,
+              errwidth=2,
+              linestyles='--')
 
     # Remove legend
     ax.get_legend().remove()

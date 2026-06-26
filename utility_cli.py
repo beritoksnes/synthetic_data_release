@@ -7,6 +7,7 @@ import json
 from os import mkdir, path
 from numpy import mean
 from numpy.random import choice, seed
+from pandas import concat
 from argparse import ArgumentParser
 
 from utils.datagen import load_s3_data_as_df, load_local_data_as_df
@@ -15,7 +16,7 @@ from utils.logging import LOGGER
 
 from sanitisation_techniques.sanitiser import SanitiserNHS
 from generative_models.data_synthesiser import BayesianNet, PrivBayes, IndependentHistogram
-from generative_models.ctgan import CTGAN
+# from generative_models.ctgan import CTGAN
 from generative_models.pate_gan import PATEGAN
 from predictive_models.predictive_model import RandForestClassTask, LogRegClassTask, LinRegTask
 
@@ -174,7 +175,7 @@ def main():
         # Get utility from raw with each target
         for tid in targetIDs:
             target = targets.loc[[tid]]
-            rawIn = rawTout.append(target)
+            rawIn = concat([rawTout, target], ignore_index=True)
 
             for ut in utilityTasks:
                 predErrorTargets = []
@@ -222,7 +223,7 @@ def main():
                 LOGGER.info(f'Target: {tid}')
                 target = targets.loc[[tid]]
 
-                rawTin = rawTout.append(target)
+                rawTin = concat([rawTout, target], ignore_index=True)
                 GenModel.fit(rawTin)
                 synTwithTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
 
@@ -273,7 +274,7 @@ def main():
                 LOGGER.info(f'Target: {tid}')
                 target = targets.loc[[tid]]
 
-                rawTin = rawTout.append(target)
+                rawTin = concat([rawTout, target], ignore_index=True)
                 sanIn = San.sanitise(rawTin)
 
                 for ut in utilityTasks:

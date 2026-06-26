@@ -6,6 +6,7 @@ import json
 
 from os import mkdir, path
 from numpy.random import choice, seed
+from pandas import concat
 from argparse import ArgumentParser
 
 from utils.datagen import load_s3_data_as_df, load_local_data_as_df
@@ -13,7 +14,7 @@ from utils.utils import json_numpy_serialzer
 from utils.logging import LOGGER
 from utils.constants import *
 
-from generative_models.ctgan import CTGAN
+# from generative_models.ctgan import CTGAN
 from generative_models.data_synthesiser import IndependentHistogram, BayesianNet, PrivBayes
 from generative_models.pate_gan import PATEGAN
 from sanitisation_techniques.sanitiser import SanitiserNHS
@@ -153,7 +154,7 @@ def main():
 
         for tid in targetIDs:
             target = targets.loc[[tid]]
-            rawTin = rawTout.append(target)
+            rawTin = concat([rawTout, target], ignore_index=True)
 
             for sa, Attack in attacks.items():
                 targetAux = target.loc[[tid], Attack.knownAttributes]
@@ -199,7 +200,7 @@ def main():
             for tid in targetIDs:
                 LOGGER.info(f'Target: {tid}')
                 target = targets.loc[[tid]]
-                rawTin = rawTout.append(target)
+                rawTin = concat([rawTout, target], ignore_index=True)
 
                 GenModel.fit(rawTin)
                 synTwithTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
@@ -250,7 +251,7 @@ def main():
             for tid in targetIDs:
                 LOGGER.info(f'Target: {tid}')
                 target = targets.loc[[tid]]
-                rawTin = rawTout.append(target)
+                rawTin = concat([rawTout, target], ignore_index=True)
                 sanIn = San.sanitise(rawTin)
 
                 for sa, Attack in attacks.items():
