@@ -288,7 +288,7 @@ def pointplot(data, x, y, hue, ax, order):
               order=order,
               ax=ax, dodge=True,
               join=False,
-            #   markers=huemarkers,
+              markers=huemarkers,
               scale=1.2,
               errwidth=2,
               linestyles='--')
