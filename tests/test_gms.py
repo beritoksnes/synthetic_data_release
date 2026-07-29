@@ -8,7 +8,8 @@ from os import path
 cwd = path.dirname(__file__)
 
 from generative_models.data_synthesiser import IndependentHistogram, BayesianNet, PrivBayes
-from generative_models.ctgan import CTGAN
+from generative_models.CTGAN import CTGAN
+from generative_models.TVAE import TVAE
 from generative_models.pate_gan import PATEGAN
 
 from utils.datagen import *
@@ -19,7 +20,7 @@ class TestGenerativeModel(TestCase):
 
     @classmethod
     def setUp(self) -> None:
-        self.raw, self.metadata = load_local_data_as_df(path.join(cwd, 'germancredit_test'))
+        self.raw, self.metadata = load_local_data_as_df(path.join(cwd, '../data/texas'))
         self.sizeS = len(self.raw)
 
     def test_independent_histogram(self):
@@ -94,7 +95,7 @@ class TestGenerativeModel(TestCase):
     def test_ctgan(self):
         print('\nTest CTGAN')
 
-        gm = CTGAN(self.metadata, batch_size=10, epochs=2)
+        gm = CTGAN(self.metadata, epochs=2) # batch_size=10, epochs=2
         gm.fit(self.raw)
         synthetic_data = gm.generate_samples(self.sizeS)
 

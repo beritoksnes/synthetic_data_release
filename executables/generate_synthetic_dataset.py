@@ -18,7 +18,7 @@ simplefilter('ignore', category=DeprecationWarning)
 
 from loguru import logger
 
-from generative_models.ctgan import CTGAN
+from generative_models.CTGAN import CTGAN
 from generative_models.data_synthesiser import (
     IndependentHistogram, BayesianNet, PrivBayes)
 from generative_models.pate_gan import PATEGAN
