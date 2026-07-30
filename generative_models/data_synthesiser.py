@@ -1,8 +1,13 @@
 """Generative models adapted from https://github.com/DataResponsibly/DataSynthesizer"""
 # Copyright <2018> <dataresponsibly.com>
 
-from numpy.random import seed, laplace, choice
-from pandas import DataFrame, merge
+# Based on https://github.com/ElisabethGriesbauer/synthetic_data_release/blob/c09269a89d00d5305361a7147443f25111778960/generative_models/data_synthesiser.py
+# Original author: Elisabeth Griesbauer, 2024
+# Modified by: Berit Omli Øksnes, 2026
+
+import numpy as np
+import pandas as pd
+
 from itertools import product
 
 from generative_models.data_synthesiser_utils.datatypes.FloatAttribute import FloatAttribute
@@ -22,7 +27,7 @@ class IndependentHistogram(GenerativeModel):
         self.metadata = self._read_meta(metadata)
         self.histogram_bins = histogram_bins
 
-        self.datatype = DataFrame
+        self.datatype = pd.DataFrame
         self.multiprocess = bool(multiprocess)
         self.infer_ranges = bool(infer_ranges)
 
@@ -48,7 +53,7 @@ class IndependentHistogram(GenerativeModel):
         assert self.trained, "Model must be fitted to some data first"
 
         LOGGER.debug(f'Generate synthetic dataset of size {nsamples}')
-        synthetic_dataset = DataFrame(columns=self.DataDescriber.attr_names)
+        synthetic_dataset = pd.DataFrame(columns=self.DataDescriber.attr_names)
         for attr_name, Attr in self.DataDescriber.attr_dict.items():
             binning_indices = Attr.sample_binning_indices_in_independent_attribute_mode(nsamples)
             synthetic_dataset[attr_name] = Attr.sample_values_from_binning_indices(binning_indices)
@@ -97,7 +102,7 @@ class BayesianNet(GenerativeModel):
         self.multiprocess = bool(multiprocess)
         self.infer_ranges = bool(infer_ranges)
         self.seed = seed
-        self.datatype = DataFrame
+        self.datatype = pd.DataFrame
 
         self.bayesian_network = None
         self.conditional_probabilities = None
@@ -119,7 +124,7 @@ class BayesianNet(GenerativeModel):
         self.DataDescriber = DataDescriber(self.metadata, self.histogram_bins, self.infer_ranges)
         self.DataDescriber.describe(data)
 
-        encoded_df = DataFrame(columns=self.DataDescriber.attr_names)
+        encoded_df = pd.DataFrame(columns=self.DataDescriber.attr_names)
         for attr_name, column in self.DataDescriber.attr_dict.items():
             encoded_df[attr_name] = column.encode_values_into_bin_idx()
 
@@ -133,7 +138,7 @@ class BayesianNet(GenerativeModel):
     def generate_samples(self, nsamples):
         LOGGER.debug(f'Generate synthetic dataset of size {nsamples}')
         assert self.trained, "Model must be fitted to some real data first"
-        synthetic_data = DataFrame(columns=self.DataDescriber.attr_names)
+        synthetic_data = pd.DataFrame(columns=self.DataDescriber.attr_names)
 
         # Get samples for attributes modelled in Bayesian net
         encoded_dataset = self._generate_encoded_dataset(nsamples)
@@ -150,11 +155,11 @@ class BayesianNet(GenerativeModel):
         return synthetic_data
 
     def _generate_encoded_dataset(self, nsamples):
-        encoded_df = DataFrame(columns=self._get_sampling_order(self.bayesian_network))
+        encoded_df = pd.DataFrame(columns=self._get_sampling_order(self.bayesian_network))
 
         bn_root_attr = self.bayesian_network[0][1][0]
         root_attr_dist = self.conditional_probabilities[bn_root_attr]
-        encoded_df[bn_root_attr] = choice(len(root_attr_dist), size=nsamples, p=root_attr_dist)
+        encoded_df[bn_root_attr] = np.random.choice(len(root_attr_dist), size=nsamples, p=root_attr_dist)
 
         for child, parents in self.bayesian_network:
             child_conditional_distributions = self.conditional_probabilities[child]
@@ -170,12 +175,12 @@ class BayesianNet(GenerativeModel):
                 filter_condition = eval(filter_condition[:-1])
                 size = encoded_df[filter_condition].shape[0]
                 if size:
-                    encoded_df.loc[filter_condition, child] = choice(len(dist), size=size, p=dist)
+                    encoded_df.loc[filter_condition, child] = np.random.choice(len(dist), size=size, p=dist)
 
             # Fill any nan values by sampling from marginal child distribution
             marginal_dist = self.DataDescriber.attr_dict[child].distribution_probabilities
             null_idx = encoded_df[child].isnull()
-            encoded_df.loc[null_idx, child] = choice(len(marginal_dist), size=null_idx.sum(), p=marginal_dist)
+            encoded_df.loc[null_idx, child] = np.random.choice(len(marginal_dist), size=null_idx.sum(), p=marginal_dist)
 
         encoded_df[encoded_df.columns] = encoded_df[encoded_df.columns].astype(int)
 
@@ -193,9 +198,9 @@ class BayesianNet(GenerativeModel):
 
         # Optional: Fix sed for reproducibility
         if self.seed is not None:
-            seed(self.seed)
+            np.random.seed(self.seed)
 
-        root_attribute = choice(dataset.columns)
+        root_attribute = np.random.choice(dataset.columns)
         V = [root_attribute]
         rest_attributes = set(dataset.columns)
         rest_attributes.remove(root_attribute)
@@ -244,7 +249,7 @@ class BayesianNet(GenerativeModel):
             else:
                 stats = self._get_attribute_frequency_counts(parents + [child], encoded_dataset)
 
-            stats = DataFrame(stats.loc[:, parents + [child, 'count']].groupby(parents + [child]).sum())
+            stats = pd.DataFrame(stats.loc[:, parents + [child, 'count']].groupby(parents + [child]).sum())
 
             if len(parents) == 1:
                 for parent_instance in stats.index.levels[0]:
@@ -265,9 +270,9 @@ class BayesianNet(GenerativeModel):
 
         # Get all possible attribute combinations
         attr_combs = [range(self.DataDescriber.attr_dict[attr].domain_size) for attr in attributes]
-        full_space = DataFrame(columns=attributes, data=list(product(*attr_combs)))
+        full_space = pd.DataFrame(columns=attributes, data=list(product(*attr_combs)))
         # stats.reset_index(inplace=True)
-        full_counts = merge(full_space, counts, how='left')
+        full_counts = pd.merge(full_space, counts, how='left')
         full_counts.fillna(0, inplace=True)
 
         return full_counts
@@ -322,11 +327,11 @@ class PrivBayes(BayesianNet):
 
         # Optional: Fix seed for reproducibility
         if self.seed is not None:
-            seed(self.seed)
+            np.random.seed(self.seed)
 
         attr_to_is_binary = {attr: dataset[attr].unique().size <= 2 for attr in dataset}
 
-        root_attribute = choice(dataset.columns)
+        root_attribute = np.random.choice(dataset.columns)
         V = [root_attribute]
         rest_attributes = set(dataset.columns)
         rest_attributes.remove(root_attribute)
@@ -344,7 +349,7 @@ class PrivBayes(BayesianNet):
 
             sampling_distribution = exponential_mechanism(self.epsilon/2, mutual_info_list, parents_pair_list, attr_to_is_binary,
                                                           num_tuples, num_attributes)
-            idx = choice(list(range(len(mutual_info_list))), p=sampling_distribution)
+            idx = np.random.choice(list(range(len(mutual_info_list))), p=sampling_distribution)
 
             bayesian_net.append(parents_pair_list[idx])
             adding_attribute = parents_pair_list[idx][0]
@@ -362,12 +367,12 @@ class PrivBayes(BayesianNet):
 
         # Get all possible attribute combinations
         attr_combs = [range(self.DataDescriber.attr_dict[attr].domain_size) for attr in attributes]
-        full_space = DataFrame(columns=attributes, data=list(product(*attr_combs)))
-        full_counts = merge(full_space, counts, how='left')
+        full_space = pd.DataFrame(columns=attributes, data=list(product(*attr_combs)))
+        full_counts = pd.merge(full_space, counts, how='left')
         full_counts.fillna(0, inplace=True)
 
         # Get Laplace noise sample
-        noise_sample = laplace(0, scale=self.laplace_noise_scale, size=full_counts.index.size)
+        noise_sample = np.random.laplace(0, scale=self.laplace_noise_scale, size=full_counts.index.size)
         full_counts['count'] += noise_sample
         full_counts.loc[full_counts['count'] < 0, 'count'] = 0
 
