@@ -1,7 +1,7 @@
 """Parent class for launching a membership inference attack on the output of a generative model"""
+import numpy as np
 from pandas import DataFrame, concat
 from pandas.api.types import CategoricalDtype
-from numpy import ndarray, concatenate, stack, array, round, zeros, arange
 
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
@@ -39,12 +39,12 @@ class MIAttackClassifier(PrivacyAttack):
         """Train a membership inference attack on a labelled training set"""
 
         if self.FeatureSet is not None:
-            synA = stack([self.FeatureSet.extract(s) for s in synA])
+            synA = np.stack([self.FeatureSet.extract(s) for s in synA])
         else:
-            synA = stack([self._df_to_array(s).flatten() for s in synA])
+            synA = np.stack([self._df_to_array(s).flatten() for s in synA])
 
-        if not isinstance(labels, ndarray):
-            labels = array(labels)
+        if not isinstance(labels, np.ndarray):
+            labels = np.array(labels)
 
         self.Distinguisher.fit(synA, labels)
 
@@ -87,19 +87,19 @@ class MIAttackClassifier(PrivacyAttack):
         else:
             f = self._df_to_array(df).reshape(1, -1)
 
-        return round(self.Distinguisher.predict(f), 0).astype(int)[0]
+        return np.round(self.Distinguisher.predict(f), 0).astype(int)[0]
 
 
     def get_confidence(self, synT, secret):
         """Calculate probability that attacker correctly predicts whether target was present in model's training data"""
         assert self.trained, 'Attack must first be trained.'
         if self.FeatureSet is not None:
-            synT = stack([self.FeatureSet.extract(s) for s in synT])
+            synT = np.stack([self.FeatureSet.extract(s) for s in synT])
         else:
             if isinstance(synT[0], DataFrame):
-                synT = stack([convert_df_to_array(s, self.metadata).flatten() for s in synT])
+                synT = np.stack([convert_df_to_array(s, self.metadata).flatten() for s in synT])
             else:
-                synT = stack([s.flatten() for s in synT])
+                synT = np.stack([s.flatten() for s in synT])
 
         probs = self.Distinguisher.predict_proba(synT)
 
@@ -183,12 +183,12 @@ class MIAttackClassifier(PrivacyAttack):
 
                 dfAsArray.append(colArray)
 
-        return concatenate(dfAsArray, axis=1)
+        return np.concatenate(dfAsArray, axis=1)
 
     def _one_hot(self, col_data, categories):
-        col_data_onehot = zeros((len(col_data), len(categories)))
+        col_data_onehot = np.zeros((len(col_data), len(categories)))
         cidx = [categories.index(c) for c in col_data]
-        col_data_onehot[arange(len(col_data)), cidx] = 1
+        col_data_onehot[np.arange(len(col_data)), cidx] = 1
 
         return col_data_onehot
 
@@ -268,7 +268,13 @@ def worker_train_shadow(rawA, train_index, GenModel, target, sizeSyn, numCopies,
     GenModel.fit(rawAout)
 
     # Generate synthetic sample for data without target
-    synOut = [GenModel.generate_samples(sizeSyn) for _ in range(numCopies)]
+    if "PrivPGD" in GenModel.__name__:
+        sdata = GenModel.generate_samples(sizeSyn * numCopies)
+        synOut = np.array_split(sdata, numCopies)
+
+    else:
+        synOut = [GenModel.generate_samples(sizeSyn) for _ in range(numCopies)]
+
     labelsOut = [LABEL_OUT for _ in range(numCopies)]
 
     # Insert targets into training data
@@ -277,13 +283,19 @@ def worker_train_shadow(rawA, train_index, GenModel, target, sizeSyn, numCopies,
     else:
         if len(target.shape) == 1:
             target = target.reshape(1, len(target))
-        rawAin = concatenate([rawAout, target])
+        rawAin = np.concatenate([rawAout, target])
 
     # Fit generative model to data including target
     GenModel.fit(rawAin)
 
     # Generate synthetic sample for data including target
-    synIn = [GenModel.generate_samples(sizeSyn) for _ in range(numCopies)]
+    if "PrivPGD" in GenModel.__name__:
+        sdata = GenModel.generate_samples(sizeSyn * numCopies)
+        synIn = np.array_split(sdata, numCopies)
+
+    else:
+        synIn = [GenModel.generate_samples(sizeSyn) for _ in range(numCopies)]
+
     labelsIn = [LABEL_IN for _ in range(numCopies)]
 
     syn = synOut + synIn
@@ -322,7 +334,7 @@ def worker_sanitise_data(rawA, train_index, Sanitiser, target, sanA, labelsA):
     else:
         if len(target.shape) == 1:
             target = target.reshape(1, len(target))
-        rawAin = concatenate([rawAout, target])
+        rawAin = np.concatenate([rawAout, target])
 
     # Fit generative model to data including target
     sanIn = Sanitiser.sanitise(rawAin)

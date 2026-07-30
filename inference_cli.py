@@ -4,9 +4,10 @@ Command-line interface for running privacy evaluation under an attribute inferen
 
 import json
 
+import numpy as np
+import pandas as pd
+
 from os import mkdir, path
-from numpy.random import choice, seed
-from pandas import concat
 from argparse import ArgumentParser
 
 from utils.datagen import load_s3_data_as_df, load_local_data_as_df
@@ -14,9 +15,14 @@ from utils.utils import json_numpy_serialzer
 from utils.logging import LOGGER
 from utils.constants import *
 
-# from generative_models.ctgan import CTGAN
-from generative_models.data_synthesiser import IndependentHistogram, BayesianNet, PrivBayes
+from generative_models.data_synthesiser import (IndependentHistogram, 
+                                                BayesianNet, 
+                                                PrivBayes,
+                                                PrivPGD)
 from generative_models.pate_gan import PATEGAN
+from generative_models.CTGAN import CTGAN
+from generative_models.TVAE import TVAE
+
 from sanitisation_techniques.sanitiser import SanitiserNHS
 from attack_models.reconstruction import LinRegAttack, RandForestAttack
 
@@ -59,13 +65,13 @@ def main():
     if not path.isdir(args.outdir):
         mkdir(args.outdir)
 
-    seed(SEED)
+    np.random.seed(SEED)
 
     ########################
     #### GAME INPUTS #######
     ########################
     # Pick targets
-    targetIDs = choice(list(rawPop.index), size=runconfig['nTargets'], replace=False).tolist()
+    targetIDs = np.random.choice(list(rawPop.index), size=runconfig['nTargets'], replace=False).tolist()
 
     # If specified: Add specific target records
     if runconfig['Targets'] is not None:
@@ -95,6 +101,9 @@ def main():
             elif gm == 'PATEGAN':
                 for params in paramsList:
                     gmList.append(PATEGAN(metadata, *params))
+            elif gm == 'PrivPGD':
+                for params in paramsList:
+                    gmList.append(PrivPGD(metadata, params))
             else:
                 raise ValueError(f'Unknown GM {gm}')
 
@@ -121,7 +130,7 @@ def main():
     for nr in range(runconfig['nIter']):
         print(f'\n--- Game iteration {nr + 1} ---')
         # Draw a raw dataset
-        rIdx = choice(list(rawPopDropTargets.index), size=runconfig['sizeRawT'], replace=False).tolist()
+        rIdx = np.random.choice(list(rawPopDropTargets.index), size=runconfig['sizeRawT'], replace=False).tolist()
         rawTout = rawPopDropTargets.loc[rIdx]
 
         ###############
@@ -154,7 +163,7 @@ def main():
 
         for tid in targetIDs:
             target = targets.loc[[tid]]
-            rawTin = concat([rawTout, target], ignore_index=True)
+            rawTin = pd.concat([rawTout, target], ignore_index=True)
 
             for sa, Attack in attacks.items():
                 targetAux = target.loc[[tid], Attack.knownAttributes]
@@ -171,7 +180,12 @@ def main():
         for GenModel in gmList:
             LOGGER.info(f'Start: Evaluation for model {GenModel.__name__}...')
             GenModel.fit(rawTout)
-            synTwithoutTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
+
+            if "PrivPGD" in GenModel.__name__:
+                sdata = GenModel.generate_samples(runconfig['sizeSynT'] * runconfig['nSynT'])
+                synTwithoutTarget = np.array_split(sdata, runconfig['nSynT'])
+            else: 
+                synTwithoutTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
 
             for sa, Attack in attacks.items():
                 for tid in targetIDs:
@@ -200,10 +214,16 @@ def main():
             for tid in targetIDs:
                 LOGGER.info(f'Target: {tid}')
                 target = targets.loc[[tid]]
-                rawTin = concat([rawTout, target], ignore_index=True)
+                rawTin = pd.concat([rawTout, target], ignore_index=True)
 
                 GenModel.fit(rawTin)
-                synTwithTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
+
+                if "PrivPGD" in GenModel.__name__:
+                    sdata = GenModel.generate_samples(runconfig['sizeSynT'] * runconfig['nSynT'])
+                    synTwithTarget = np.array_split(sdata, runconfig['nSynT'])
+
+                else:
+                    synTwithTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
 
                 for sa, Attack in attacks.items():
                     targetAux = target.loc[[tid], Attack.knownAttributes]
@@ -251,7 +271,7 @@ def main():
             for tid in targetIDs:
                 LOGGER.info(f'Target: {tid}')
                 target = targets.loc[[tid]]
-                rawTin = concat([rawTout, target], ignore_index=True)
+                rawTin = pd.concat([rawTout, target], ignore_index=True)
                 sanIn = San.sanitise(rawTin)
 
                 for sa, Attack in attacks.items():

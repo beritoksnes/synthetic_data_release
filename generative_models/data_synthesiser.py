@@ -7,19 +7,30 @@
 
 import numpy as np
 import pandas as pd
+import pyvinecopulib as pv
 
 from itertools import product
 
 from generative_models.data_synthesiser_utils.datatypes.FloatAttribute import FloatAttribute
 from generative_models.data_synthesiser_utils.datatypes.IntegerAttribute import IntegerAttribute
 from generative_models.data_synthesiser_utils.datatypes.StringAttribute import StringAttribute
-from generative_models.data_synthesiser_utils.utils import bayes_worker, normalize_given_distribution, exponential_mechanism
+from generative_models.data_synthesiser_utils.utils import bayes_worker, normalize_given_distribution, exponential_mechanism, privpgd_discretize_data, privpgd_discretize_data, privpgd_revert_discretization
 
 from generative_models.generative_model import GenerativeModel
 
 from utils.constants import *
 from utils.logging import LOGGER
 
+import subprocess
+import os
+import json
+
+from datetime import datetime
+from pathlib import Path
+
+venv_privpgd = ".venv-privpdg"
+
+# Slightly modified from forked repository: ####
 
 class IndependentHistogram(GenerativeModel):
 
@@ -434,7 +445,197 @@ class DataDescriber(object):
 
         return attr_dict
 
+# Slightly modified from Elisabeth's repository ####
 
+class PrivPGD(GenerativeModel):
+    def __init__(self, 
+                 metadata,
+                 savedir = "./data",
+                 domain = "./data/domain.json",
+                 epsilon = 2.5,
+                 delta = 0.00001,
+                 iters = 1000,
+                 n_particles = 1000,
+                 lr = 0.1,
+                 scheduler_step = 50,
+                 scheduler_gamma = 0.75,
+                 num_projections = 10,
+                 scale_reg = 0.0,
+                 p_mask = 80,
+                 batch_size = 5, 
+                 histogram_bins = 45,
+                 infer_ranges=True, 
+                 multiprocess=True, 
+                 seed=None):
+        """
+        Initializes the PrivPGD class with parameters to be passed to the privpgd.py script.
+        """
+        self.metadata = self._read_meta(metadata)
+        self.savedir = savedir
+        self.domain = domain
+        self.epsilon = epsilon
+        self.delta = delta
+        self.iters = iters
+        self.n_particles = n_particles
+        self.lr = lr
+        self.scheduler_step = scheduler_step
+        self.scheduler_gamma = scheduler_gamma
+        self.num_projections = num_projections
+        self.scale_reg = scale_reg
+        self.p_mask = p_mask
+        self.batch_size = batch_size
+
+        self.__name__ = f'PrivPGD{self.epsilon}_{self.delta}'
+        
+        self.datatype = pd.DataFrame
+        self.DataDescriber = None
+        self.trained = False
+
+        self.multiprocess = bool(multiprocess)
+        self.infer_ranges = bool(infer_ranges)
+        self.histogram_bins = histogram_bins
+
+
+    def fit(self, data):
+        if self.trained:
+            self.trained = False
+            self.DataDescriber = None
+
+        self.DataDescriber = DataDescriber(self.metadata, self.histogram_bins, self.infer_ranges)
+        self.DataDescriber.describe(data)
+
+        real_data = pd.DataFrame(data)
+        rdata = real_data.copy(deep=True)
+        rdata2 = real_data.copy(deep=True)
+        
+        self.real_data = rdata
+
+        # infer categricals from meta data
+        self.cols_to_exclude = [key for key, value in self.metadata.items() if value['type'] == 'Categorical']
+        
+        # set num_bins to default value 32 as in the paper
+        self.disc_real_data = privpgd_discretize_data(data = rdata2, except_for = self.cols_to_exclude, num_bins = 32)
+
+        # Add a unique timestamp to the CSV filename
+        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
+        discretized_filename = f'./data/disc_training_data_privpgd_{timestamp}.csv'
+
+        # Save discretized data to a CSV file
+        self.disc_real_data.to_csv(discretized_filename)
+
+        # Store the filename for use in the generate_samples method
+        self.discretized_filename = discretized_filename
+
+        # Create unique dir name for saving generated synthetic data to avoid over-writing
+        randNum = np.random.randint(0, 500)
+        self.savedir = f'./data/synth_data_{timestamp}_{randNum}'
+        
+        if not os.path.exists(self.savedir):
+            os.makedirs(self.savedir)
+
+        # test
+        assert ((self.disc_real_data.apply(pd.to_numeric, errors='coerce') % 1) == 0).all().all(), f'real data was not discretized properly'
+
+        # privpgd fits and samples in one go, so no model estimation here
+        print("done!")
+
+
+    def generate_samples(self, nsamples):    
+        """
+        This method runs the privpgd.py script inside the privpgd conda environment and passes
+        the input parameters via subprocess. It generates nsamples synthetic samples.
+        """
+        try:
+
+            # path to the python executable inside the venv
+            venv_python = os.path.join(venv_privpgd, "bin", "python")
+
+            command_string = (
+                f"{venv_python} ./private-pgd/examples/privpgd.py "
+                f"--savedir {self.savedir} --train_dataset {self.discretized_filename} "
+                f"--domain {self.domain} --epsilon {self.epsilon} --delta {self.delta} "
+                f"--iters {self.iters} --n_particles {nsamples} --lr {self.lr} "
+                f"--num_projections {self.num_projections} --scale_reg {self.scale_reg} "
+                f"--p_mask {self.p_mask} --batch_size {self.batch_size}"
+        )
+
+            with open("output.txt", "w") as f: 
+                process = subprocess.run(command_string, shell = True, text=True, stdout=f, stderr=f)
+
+            # Paths to the output files generated by privpgd.py
+            results_file = os.path.join(self.savedir, "privpgd_results.csv")
+            synth_file = os.path.join(self.savedir, "privpgd_synth_data.csv")
+
+            # remove the discrete real train data
+            path = Path(self.discretized_filename)
+            if path.exists() and path.is_file():
+                path.unlink()
+            else:
+                print(f"File {path} does not exist.")
+
+            # Return the synthetic data from privpgd_synth_data.csv as a pandas DataFrame
+            if os.path.exists(synth_file):
+                disc_synth_data = pd.read_csv(synth_file)
+                synth_data = privpgd_revert_discretization(original_data=self.real_data, 
+                                                           discretized_data=disc_synth_data, 
+                                                           except_for= self.cols_to_exclude, 
+                                                           num_bins = 32)
+
+                # test
+                for col in [key for key, value in self.metadata.items() if value['type'] == 'Float']:
+                    if np.all((synth_data[col] % 1) == 0):
+                        print(f'Attribute {col} was not reverted properly or is discrete.')
+                
+                # os.remove(self.discretized_filename)
+                print(f"PrivPGD: {nsamples} synthetic samples generated!")
+                return synth_data
+
+            else:
+                print(f"Synthetic data file {synth_file} not found.")
+                return None
+            
+        except FileNotFoundError as exc:
+            print(f"Process failed because the executable could not be found.\n{exc}")
+
+        except subprocess.CalledProcessError as exc:
+            print(
+                f"Process failed because did not return a successful return code. "
+                f"Returned {exc.returncode}\n{exc}"
+            )
+
+        except subprocess.TimeoutExpired as exc:
+            print(f"Process timed out.\n{exc}")  
+
+    
+    def _read_meta(self, metadata):
+        """ Read metadata from metadata file."""
+        metadict = {}
+
+        for cdict in metadata['columns']:
+            col = cdict['name']
+            coltype = cdict['type']
+
+            if coltype == FLOAT or coltype == INTEGER:
+                metadict[col] = {
+                    'type': coltype,
+                    'min': cdict['min'],
+                    'max': cdict['max']
+                }
+
+            elif coltype == CATEGORICAL or coltype == ORDINAL:
+                metadict[col] = {
+                    'type': coltype,
+                    'categories': cdict['i2s'],
+                    'size': len(cdict['i2s'])
+                }
+
+            else:
+                raise ValueError(f'Unknown data type {coltype} for attribute {col}')
+
+        return metadict
+
+
+# Added by me ####
 
 
 

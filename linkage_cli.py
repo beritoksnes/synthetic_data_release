@@ -4,10 +4,11 @@ Command-line interface for running privacy evaluation with respect to the risk o
 
 import json
 
+import numpy as np
+import pandas as pd
+
 from os import mkdir, path
-from numpy.random import choice, seed
 from argparse import ArgumentParser
-from pandas import DataFrame, concat
 
 from utils.datagen import load_s3_data_as_df, load_local_data_as_df
 from utils.utils import json_numpy_serialzer
@@ -20,11 +21,13 @@ from feature_sets.bayes import CorrelationsFeatureSet
 
 from sanitisation_techniques.sanitiser import SanitiserNHS
 
-# from generative_models.ctgan import CTGAN (does not work ...)
+from generative_models.CTGAN import CTGAN
+from generative_models.TVAE import TVAE
 from generative_models.pate_gan import PATEGAN
 from generative_models.data_synthesiser import (IndependentHistogram,
                                                 BayesianNet,
-                                                PrivBayes)
+                                                PrivBayes,
+                                                PrivPGD)
 
 from attack_models.mia_classifier import (MIAttackClassifierRandomForest,
                                           generate_mia_shadow_data,
@@ -70,13 +73,13 @@ def main():
     if not path.isdir(args.outdir):
         mkdir(args.outdir)
 
-    seed(SEED)
+    np.random.seed(SEED)
 
     ########################
     #### GAME INPUTS #######
     ########################
     # Pick targets
-    targetIDs = choice(list(rawPop.index), size=runconfig['nTargets'], replace=False).tolist()
+    targetIDs = np.random.choice(list(rawPop.index), size=runconfig['nTargets'], replace=False).tolist()
 
     # If specified: Add specific target records
     if runconfig['Targets'] is not None:
@@ -88,7 +91,7 @@ def main():
     rawPopDropTargets = rawPop.drop(targetIDs)
 
     # Init adversary's prior knowledge
-    rawAidx = choice(list(rawPopDropTargets.index), size=runconfig['sizeRawA'], replace=False).tolist()
+    rawAidx = np.random.choice(list(rawPopDropTargets.index), size=runconfig['sizeRawA'], replace=False).tolist()
     rawA = rawPop.loc[rawAidx, :]
 
     # List of candidate generative models to evaluate
@@ -110,6 +113,9 @@ def main():
             elif gm == 'PATEGAN':
                 for params in paramsList:
                     gmList.append(PATEGAN(metadata, *params))
+            elif gm == 'PrivPGD':
+                for params in paramsList:
+                    gmList.append(PrivPGD(metadata, *params))
             else:
                 raise ValueError(f'Unknown GM {gm}')
 
@@ -143,10 +149,10 @@ def main():
             sanA, labelsA = generate_mia_anon_data(San, target, rawA, runconfig['sizeRawT'], runconfig['nShadows'] * runconfig['nSynA'])
 
             # Train attack on shadow data
-            for Feature in [NaiveFeatureSet(DataFrame),
-                            HistogramFeatureSet(DataFrame, metadata, nbins=San.histogram_size, quids=San.quids),
-                            CorrelationsFeatureSet(DataFrame, metadata, quids=San.quids),
-                            EnsembleFeatureSet(DataFrame, metadata, nbins=San.histogram_size, quasi_id_cols=San.quids)]:
+            for Feature in [NaiveFeatureSet(pd.DataFrame),
+                            HistogramFeatureSet(pd.DataFrame, metadata, nbins=San.histogram_size, quids=San.quids),
+                            CorrelationsFeatureSet(pd.DataFrame, metadata, quids=San.quids),
+                            EnsembleFeatureSet(pd.DataFrame, metadata, nbins=San.histogram_size, quasi_id_cols=San.quids)]:
 
                 Attack = MIAttackClassifierRandomForest(metadata=metadata, FeatureSet=Feature, quids=San.quids)
                 Attack.train(sanA, labelsA)
@@ -185,14 +191,22 @@ def main():
     for nr in range(runconfig['nIter']):
         print(f'\n--- Game iteration {nr + 1} ---')
         # Draw a raw dataset
-        rIdx = choice(list(rawPopDropTargets.index), size=runconfig['sizeRawT'], replace=False).tolist()
+        rIdx = np.random.choice(list(rawPopDropTargets.index), size=runconfig['sizeRawT'], replace=False).tolist()
         rawTout = rawPopDropTargets.loc[rIdx]
 
         for GenModel in gmList:
             LOGGER.info(f'Start: Evaluation for model {GenModel.__name__}...')
             # Train a generative model
             GenModel.fit(rawTout)
-            synTwithoutTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
+
+            if "PrivPGD" in GenModel.__name__:
+                    sdata = GenModel.generate_samples(runconfig['sizeSynT'] * runconfig['nSynT'])
+                    synTwithoutTarget = np.array_split(sdata, runconfig['nSynT'])
+
+            else:
+                synTwithoutTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
+
+
             synLabelsOut = [LABEL_OUT for _ in range(runconfig['nSynT'])]
 
             for tid in targetIDs:
@@ -200,9 +214,16 @@ def main():
                 target = targets.loc[[tid]]
                 resultsTargetPrivacy[tid][f'{GenModel.__name__}'][nr] = {}
 
-                rawTin = concat([rawTout, target], ignore_index=True)
+                rawTin = pd.concat([rawTout, target], ignore_index=True)
                 GenModel.fit(rawTin)
-                synTwithTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
+
+                if "PrivPGD" in GenModel.__name__:
+                    sdata = GenModel.generate_samples(runconfig['sizeSynT'] * runconfig['nSynT'])
+                    synTwithTarget = np.array_split(sdata, runconfig['nSynT'])
+
+                else:
+                    synTwithTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
+
                 synLabelsIn = [LABEL_IN for _ in range(runconfig['nSynT'])]
 
                 synT = synTwithoutTarget + synTwithTarget
@@ -232,7 +253,7 @@ def main():
                 target = targets.loc[[tid]]
                 resultsTargetPrivacy[tid][San.__name__][nr] = {}
 
-                rawTin = concat([rawTout, target], ignore_index=True)
+                rawTin = pd.concat([rawTout, target], ignore_index=True)
                 sanIn = San.sanitise(rawTin)
 
                 sanT = [sanOut, sanIn]
