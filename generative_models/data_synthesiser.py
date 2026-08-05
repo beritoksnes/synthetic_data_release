@@ -14,7 +14,7 @@ from itertools import product
 from generative_models.data_synthesiser_utils.datatypes.FloatAttribute import FloatAttribute
 from generative_models.data_synthesiser_utils.datatypes.IntegerAttribute import IntegerAttribute
 from generative_models.data_synthesiser_utils.datatypes.StringAttribute import StringAttribute
-from generative_models.data_synthesiser_utils.utils import bayes_worker, normalize_given_distribution, exponential_mechanism, privpgd_discretize_data, privpgd_discretize_data, privpgd_revert_discretization
+from generative_models.data_synthesiser_utils.utils import bayes_worker, normalize_given_distribution, exponential_mechanism
 
 from generative_models.generative_model import GenerativeModel
 
@@ -24,11 +24,10 @@ from utils.logging import LOGGER
 import subprocess
 import os
 import json
+import scipy.stats
 
 from datetime import datetime
 from pathlib import Path
-
-venv_privpgd = ".venv-privpdg"
 
 # Slightly modified from forked repository: ####
 
@@ -446,166 +445,108 @@ class DataDescriber(object):
         return attr_dict
 
 # Slightly modified from Elisabeth's repository ####
-
-class PrivPGD(GenerativeModel):
+class Cvine(GenerativeModel):
+    
     def __init__(self, 
-                 metadata,
-                 savedir = "./data",
-                 domain = "./data/domain.json",
-                 epsilon = 2.5,
-                 delta = 0.00001,
-                 iters = 1000,
-                 n_particles = 1000,
-                 lr = 0.1,
-                 scheduler_step = 50,
-                 scheduler_gamma = 0.75,
-                 num_projections = 10,
-                 scale_reg = 0.0,
-                 p_mask = 80,
-                 batch_size = 5, 
-                 histogram_bins = 45,
-                 infer_ranges=True, 
-                 multiprocess=True, 
-                 seed=None):
-        """
-        Initializes the PrivPGD class with parameters to be passed to the privpgd.py script.
-        """
+                 metadata, 
+                 pc_estimation = "parametric", 
+                 trunc_lvl = 1000000, 
+                 histogram_bins = 45, 
+                 infer_ranges = False, 
+                 multiprocess = True, 
+                 seed = None):
         self.metadata = self._read_meta(metadata)
-        self.savedir = savedir
-        self.domain = domain
-        self.epsilon = epsilon
-        self.delta = delta
-        self.iters = iters
-        self.n_particles = n_particles
-        self.lr = lr
-        self.scheduler_step = scheduler_step
-        self.scheduler_gamma = scheduler_gamma
-        self.num_projections = num_projections
-        self.scale_reg = scale_reg
-        self.p_mask = p_mask
-        self.batch_size = batch_size
-
-        self.__name__ = f'PrivPGD{self.epsilon}_{self.delta}'
-        
+        self.histogram_bins = histogram_bins
+        self.pc_estimation = pc_estimation
+        self.trunc_lvl = trunc_lvl
+        self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(len(metadata['columns']))]
         self.datatype = pd.DataFrame
+        self.__name__ = 'Cvine'
         self.DataDescriber = None
         self.trained = False
 
         self.multiprocess = bool(multiprocess)
         self.infer_ranges = bool(infer_ranges)
-        self.histogram_bins = histogram_bins
-
-
+        
     def fit(self, data):
+        """Fit C-vine model using pyvibecopulib library"""
         if self.trained:
             self.trained = False
             self.DataDescriber = None
 
         self.DataDescriber = DataDescriber(self.metadata, self.histogram_bins, self.infer_ranges)
         self.DataDescriber.describe(data)
-
-        real_data = pd.DataFrame(data)
-        rdata = real_data.copy(deep=True)
-        rdata2 = real_data.copy(deep=True)
+        data = pd.DataFrame(data)
         
-        self.real_data = rdata
-
-        # infer categricals from meta data
-        self.cols_to_exclude = [key for key, value in self.metadata.items() if value['type'] == 'Categorical']
+        self.real_data = data
+        n, d = data.shape
         
-        # set num_bins to default value 32 as in the paper
-        self.disc_real_data = privpgd_discretize_data(data = rdata2, except_for = self.cols_to_exclude, num_bins = 32)
-
-        # Add a unique timestamp to the CSV filename
-        timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S-%f")
-        discretized_filename = f'./data/disc_training_data_privpgd_{timestamp}.csv'
-
-        # Save discretized data to a CSV file
-        self.disc_real_data.to_csv(discretized_filename)
-
-        # Store the filename for use in the generate_samples method
-        self.discretized_filename = discretized_filename
-
-        # Create unique dir name for saving generated synthetic data to avoid over-writing
-        randNum = np.random.randint(0, 500)
-        self.savedir = f'./data/synth_data_{timestamp}_{randNum}'
-        
-        if not os.path.exists(self.savedir):
-            os.makedirs(self.savedir)
-
-        # test
-        assert ((self.disc_real_data.apply(pd.to_numeric, errors='coerce') % 1) == 0).all().all(), f'real data was not discretized properly'
-
-        # privpgd fits and samples in one go, so no model estimation here
-        print("done!")
-
-
-    def generate_samples(self, nsamples):    
-        """
-        This method runs the privpgd.py script inside the privpgd conda environment and passes
-        the input parameters via subprocess. It generates nsamples synthetic samples.
-        """
-        try:
-
-            # path to the python executable inside the venv
-            venv_python = os.path.join(venv_privpgd, "bin", "python")
-
-            command_string = (
-                f"{venv_python} ./private-pgd/examples/privpgd.py "
-                f"--savedir {self.savedir} --train_dataset {self.discretized_filename} "
-                f"--domain {self.domain} --epsilon {self.epsilon} --delta {self.delta} "
-                f"--iters {self.iters} --n_particles {nsamples} --lr {self.lr} "
-                f"--num_projections {self.num_projections} --scale_reg {self.scale_reg} "
-                f"--p_mask {self.p_mask} --batch_size {self.batch_size}"
-        )
-
-            with open("output.txt", "w") as f: 
-                process = subprocess.run(command_string, shell = True, text=True, stdout=f, stderr=f)
-
-            # Paths to the output files generated by privpgd.py
-            results_file = os.path.join(self.savedir, "privpgd_results.csv")
-            synth_file = os.path.join(self.savedir, "privpgd_synth_data.csv")
-
-            # remove the discrete real train data
-            path = Path(self.discretized_filename)
-            if path.exists() and path.is_file():
-                path.unlink()
+        # transform data to unit cube
+        u_data = []
+        for i in range(d):
+            if self.var_types[i] == "c":
+                u_data.append(scipy.stats.rankdata(data.iloc[:,i]))
             else:
-                print(f"File {path} does not exist.")
-
-            # Return the synthetic data from privpgd_synth_data.csv as a pandas DataFrame
-            if os.path.exists(synth_file):
-                disc_synth_data = pd.read_csv(synth_file)
-                synth_data = privpgd_revert_discretization(original_data=self.real_data, 
-                                                           discretized_data=disc_synth_data, 
-                                                           except_for= self.cols_to_exclude, 
-                                                           num_bins = 32)
-
-                # test
-                for col in [key for key, value in self.metadata.items() if value['type'] == 'Float']:
-                    if np.all((synth_data[col] % 1) == 0):
-                        print(f'Attribute {col} was not reverted properly or is discrete.')
+                u_data.append(scipy.stats.rankdata(data.iloc[:,i], method = "max"))
                 
-                # os.remove(self.discretized_filename)
-                print(f"PrivPGD: {nsamples} synthetic samples generated!")
-                return synth_data
-
+        for i in range(d):
+            if self.var_types[i] == "d":
+                u_data.append(scipy.stats.rankdata(data.iloc[:,i], method = "min") - 1) 
             else:
-                print(f"Synthetic data file {synth_file} not found.")
-                return None
+                pass
+        
+        u_data = np.array(u_data).transpose() * 1/(n+1)
+
+        # set vine tree structure
+        structure = pv.CVineStructure(order = range(1,d+1,1), trunc_lvl = self.trunc_lvl)      
+        
+        # setting controls        
+        if self.pc_estimation == "parametric":
+            controls = pv.FitControlsVinecop(family_set = pv.parametric, 
+                                         trunc_lvl = self.trunc_lvl, 
+                                         parametric_method = 'mle', 
+                                         selection_criterion = 'aic')
+        elif self.pc_estimation == "nonparametric":
+            controls = pv.FitControlsVinecop(family_set = pv.nonparametric, 
+                                             nonparametric_method = "linear", 
+                                             trunc_lvl = self.trunc_lvl, 
+                                             selection_criterion = 'aic')
+        else:
+            controls = pv.FitControlsVinecop(nonparametric_method = "linear",
+                                             parametric_method = "mle", 
+                                             trunc_lvl = self.trunc_lvl, 
+                                             selection_criterion = 'aic')
+
+        # fit C-vine
+        self.vine = pv.Vinecop(d=d).from_data(data = u_data,
+                                              structure = structure,
+                                              var_types = self.var_types,
+                                              controls = controls)
+    
+    
+    def generate_samples(self, nsamples):
+            """Generate samples from fitted C-vine model"""
+            u_synth = pv.Vinecop.simulate(self.vine, n=nsamples)
             
-        except FileNotFoundError as exc:
-            print(f"Process failed because the executable could not be found.\n{exc}")
+            n, d = u_synth.shape
+            
+            synth_data = []
+            for i in range(d):
+                if self.var_types[i] == "c":
+                    s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'median_unbiased')
+                    synth_data.append(s)
+                else:
+                    s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'closest_observation')
+                    synth_data.append(s)
+                    
+            synth_data = pd.DataFrame(synth_data).transpose()
 
-        except subprocess.CalledProcessError as exc:
-            print(
-                f"Process failed because did not return a successful return code. "
-                f"Returned {exc.returncode}\n{exc}"
-            )
+            synth_data.columns = list(self.real_data) 
 
-        except subprocess.TimeoutExpired as exc:
-            print(f"Process timed out.\n{exc}")  
+            convert_dict = {col: object if dtype == 'd' else float for col, dtype in zip(synth_data.columns, self.var_types)}
+            synth_data = synth_data.astype(convert_dict)
 
+            return synth_data     
     
     def _read_meta(self, metadata):
         """ Read metadata from metadata file."""
@@ -633,7 +574,6 @@ class PrivPGD(GenerativeModel):
                 raise ValueError(f'Unknown data type {coltype} for attribute {col}')
 
         return metadict
-
 
 # Added by me ####
 

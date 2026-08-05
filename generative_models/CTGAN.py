@@ -26,22 +26,18 @@ class CTGAN(GenerativeModel):
     """A conditional generative adversarial network for tabular data"""
     def __init__(self, 
                  metadata=None,
-                 enforce_min_max_values=True, 
-                 enforce_rounding=True,
-                 locales=['en_US'],
                  epochs=300,
-                 verbose=False,
-                 enable_gpu=True,
-                 multiprocess=False):
+                 batch_size=500):
 
         self.metadata = metadata
-        self.enforce_min_max_values = enforce_min_max_values
-        self.enforce_rounding = enforce_rounding
-        self.locales = locales
+        self.enforce_min_max_values = True
+        self.enforce_rounding = True
+        self.locales = ['en_US']
         self.epochs = epochs
-        self.verbose = verbose
-        self.enable_gpu = enable_gpu
-        self.multiprocess = bool(multiprocess)
+        self.verbose = False
+        self.enable_gpu = True
+        self.multiprocess = False
+        self.batch_size = batch_size
         
         self.datatype = DataFrame
         self.infer_ranges = True
@@ -66,7 +62,8 @@ class CTGAN(GenerativeModel):
                                             locales=self.locales,
                                             epochs=self.epochs, 
                                             verbose=self.verbose, 
-                                            enable_gpu=self.verbose)
+                                            enable_gpu=self.verbose,
+                                            batch_size=self.batch_size)
         
 
         LOGGER.debug(f'Start fitting {self.__class__.__name__} to data of shape {data.shape}...')

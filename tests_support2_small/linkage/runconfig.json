@@ -1,7 +1,7 @@
  {
   "sensitiveAttributes": {"totcst": "LinReg",
     "crea": "LinReg"},
-  "nIter": 10,
+  "nIter": 5,
   "sizeRawA": 500,
   "sizeRawT": 400,
   "nShadows": 10,
@@ -11,7 +11,9 @@
   "nTargets": 0,
   "Targets": ["ID447", "ID1124", "ID84"],
   "generativeModels": {
-    "BayesianNet": [[25, 1]],
-    "PrivBayes": [[25, 1, 1.0]]
+    "Cvine": [["parametric", 26]],
+    "PrivBayes": [[25, 1, 0.1]],
+    "CTGAN": [[300, 500]],
+    "TVAE": [[1500,400]]
   }
 }

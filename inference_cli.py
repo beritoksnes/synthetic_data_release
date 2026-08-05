@@ -18,7 +18,7 @@ from utils.constants import *
 from generative_models.data_synthesiser import (IndependentHistogram, 
                                                 BayesianNet, 
                                                 PrivBayes,
-                                                PrivPGD)
+                                                Cvine)
 from generative_models.pate_gan import PATEGAN
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
@@ -101,9 +101,13 @@ def main():
             elif gm == 'PATEGAN':
                 for params in paramsList:
                     gmList.append(PATEGAN(metadata, *params))
-            elif gm == 'PrivPGD':
+            # Added:
+            elif gm == 'TVAE':
                 for params in paramsList:
-                    gmList.append(PrivPGD(metadata, params))
+                    gmList.append(TVAE(metadata, *params))
+            elif gm == 'Cvine':
+                for params in paramsList:
+                    gmList.append(Cvine(metadata, *params))
             else:
                 raise ValueError(f'Unknown GM {gm}')
 
