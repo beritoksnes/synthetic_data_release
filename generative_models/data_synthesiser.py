@@ -8,7 +8,7 @@
 import numpy as np
 import pandas as pd
 import pyvinecopulib as pv
-
+import scipy.stats
 from itertools import product
 
 from generative_models.data_synthesiser_utils.datatypes.FloatAttribute import FloatAttribute
@@ -24,10 +24,14 @@ from utils.logging import LOGGER
 import subprocess
 import os
 import json
-import scipy.stats
+import tempfile
 
 from datetime import datetime
 from pathlib import Path
+
+CVINE_SENSITIVE_SCRIPT = Path("__file__").resolve().parent / "generative_models" / "run_cvinecop_sensitive_estimation.R"
+
+
 
 # Slightly modified from forked repository: ####
 
@@ -320,7 +324,12 @@ class PrivBayes(BayesianNet):
     A differentially private BayesianNet model using GreedyBayes
     """
     def __init__(self, metadata, histogram_bins=10, degree=1, epsilon=.1, infer_ranges=False, multiprocess=True, seed=None):
-        super().__init__(metadata=metadata, histogram_bins=histogram_bins, degree=degree, infer_ranges=infer_ranges, multiprocess=multiprocess, seed=seed)
+        super().__init__(metadata=metadata, 
+                         histogram_bins=histogram_bins, 
+                         degree=degree, 
+                         infer_ranges=infer_ranges, 
+                         multiprocess=multiprocess, 
+                         seed=seed)
 
         self.epsilon = float(epsilon)
 
@@ -357,8 +366,12 @@ class PrivBayes(BayesianNet):
                 parents_pair_list += res[0]
                 mutual_info_list += res[1]
 
-            sampling_distribution = exponential_mechanism(self.epsilon/2, mutual_info_list, parents_pair_list, attr_to_is_binary,
-                                                          num_tuples, num_attributes)
+            sampling_distribution = exponential_mechanism(self.epsilon/2, 
+                                                          mutual_info_list, 
+                                                          parents_pair_list, 
+                                                          attr_to_is_binary,
+                                                          num_tuples, 
+                                                          num_attributes)
             idx = np.random.choice(list(range(len(mutual_info_list))), p=sampling_distribution)
 
             bayesian_net.append(parents_pair_list[idx])
@@ -446,15 +459,13 @@ class DataDescriber(object):
 
 # Slightly modified from Elisabeth's repository ####
 class Cvine(GenerativeModel):
-    
     def __init__(self, 
                  metadata, 
                  pc_estimation = "parametric", 
                  trunc_lvl = 1000000, 
                  histogram_bins = 45, 
                  infer_ranges = False, 
-                 multiprocess = True, 
-                 seed = None):
+                 multiprocess = True):
         self.metadata = self._read_meta(metadata)
         self.histogram_bins = histogram_bins
         self.pc_estimation = pc_estimation
@@ -576,6 +587,126 @@ class Cvine(GenerativeModel):
         return metadict
 
 # Added by me ####
+
+class CvineSensitive(GenerativeModel):
+    def __init__(self, 
+                 metadata, 
+                 family_set = "parametric",
+                 sensitive = None,
+                 lmbda = 0,
+                 trunc_lvl = None, 
+                 histogram_bins = 45, 
+                 infer_ranges = False, 
+                 multiprocess = True):
+        """A C-vine copula model putting penalties on sensitive parameters during estimation"""
+        self.metadata = self._read_meta(metadata)
+        self.family_set = family_set
+        self.sensitive = sensitive
+        self.lmbda = lmbda 
+        self.histogram_bins = histogram_bins
+        self.multiprocess = bool(multiprocess)
+        self.infer_ranges = bool(infer_ranges)
+
+        self.d = len(metadata['columns'])
+        self.trunc_lvl = trunc_lvl if trunc_lvl is not None else self.d - 1
+        self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
+
+        self.datatype = pd.DataFrame
+        self.__name__ = f'CvineSensitive({self.lmbda})'
+        self.DataDescriber = None
+        self.trained = False
+
+    def fit(self, data):
+            """Fit model..."""
+            LOGGER.debug(f'Start fitting CVineSensitive({self.lmbda}) model to data of shape {data.shape}...')
+
+            self.real_data = data
+
+            # Fit model by calling R-script (add more documentation ASAP)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp = Path(tmpdir)
+                data_path, params_path, model_path = tmp / "data.csv", tmp / "params.json", tmp / "model.json"
+    
+                # Export data to temporary csv file
+                data.to_csv(data_path, index=False)
+    
+                # Export parameters to temporary json file
+                params = {"var_types":self.var_types,
+                          "family_set":self.family_set,
+                          "trunc_lvl":self.trunc_lvl,
+                          "sensitive":self.sensitive,
+                          "lmbda":self.lmbda}
+                params_path.write_text(json.dumps(params))
+    
+                # Run R code
+                cmd = ["Rscript",
+                       CVINE_SENSITIVE_SCRIPT,
+                       data_path,
+                       params_path,
+                       model_path]
+    
+                result = subprocess.run(cmd, capture_output=True)
+    
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"R estimation failed (exit {result.returncode}).\n"
+                        f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
+                    )
+                  
+                self.vc = pv.Vinecop(d=self.d).from_json(model_path.read_text(encoding="utf-8"))
+    
+            LOGGER.debug(f'Finished fitting CVineSensitive({self.lmbda})')
+            self.trained = True
+
+    def generate_samples(self, nsamples):
+                """Generate samples from fitted C-vine model"""
+                u_synth = pv.Vinecop.simulate(self.vc, n=nsamples)
+                
+                synth_data = []
+                for i in range(self.d):
+                    if self.var_types[i] == "c":
+                        s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'median_unbiased')
+                        synth_data.append(s)
+                    else:
+                        s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'closest_observation')
+                        synth_data.append(s)
+                        
+                synth_data = pd.DataFrame(synth_data).transpose()
+    
+                synth_data.columns = list(self.real_data) 
+    
+                convert_dict = {col: object if dtype == 'd' else float for col, dtype in zip(synth_data.columns, self.var_types)}
+                synth_data = synth_data.astype(convert_dict)
+    
+                return synth_data     
+
+    def _read_meta(self, metadata):
+            """ Read metadata from metadata file."""
+            metadict = {}
+
+            for cdict in metadata['columns']:
+                col = cdict['name']
+                coltype = cdict['type']
+
+                if coltype == FLOAT or coltype == INTEGER:
+                    metadict[col] = {
+                        'type': coltype,
+                        'min': cdict['min'],
+                        'max': cdict['max']
+                    }
+
+                elif coltype == CATEGORICAL or coltype == ORDINAL:
+                    metadict[col] = {
+                        'type': coltype,
+                        'categories': cdict['i2s'],
+                        'size': len(cdict['i2s'])
+                    }
+
+                else:
+                    raise ValueError(f'Unknown data type {coltype} for attribute {col}')
+
+            return metadict
+
 
 
 
