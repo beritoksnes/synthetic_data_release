@@ -157,17 +157,10 @@ cvinecop_sensitive <- function(data,
                                sensitive=NULL, 
                                lmbda=0) {
   # Prepare data
-  n <- dim(data)[1]
-  # Check if response is discrete
-  discrete_response <- tail(var_types,1)=="d"
-  if (discrete_response) {
-    d <- ncol(data) - 1 # Account for the extra column required for discrete data
-  } else {
-    d <- ncol(data)
-  }
-  dt <- copy(data)
-  dt <- as.data.table(dt)
-  var_names <- colnames(dt)
+  n <- dim(data)[1]; d <- dim(data)[2]
+  d_discrete <- sum(var_types=="d")
+  d <- d - d_discrete
+  discrete_response <- var_types[d] == "d"
   
   # Create matrices for C-vine estimation
   # R-vine matrix
@@ -312,22 +305,22 @@ args <- commandArgs(trailingOnly=TRUE)
 
 data <- read.csv(args[1]) %>% as.data.table()
 
-params <- fromJSON(args[2])
-var_types <- params$var_types
+params     <- fromJSON(args[2])
+var_types  <- params$var_types
 family_set <- params$family_set
-sensitive <- params$sensitive
-lmbda <- params$lmbda
+sensitive  <- params$sensitive
+lmbda      <- params$lmbda
 
 model_path <- args[3]
 
 # Estimate C-vine with penalty on sensitive dependencies
 u <- prep_data(data, var_types)
 
-fit <- cvinecop_sensitive(data = u, 
-                          var_type = var_types,
-                          family_set = family_set,
-                          sensitive = sensitive,
-                          lmbda = lmbda)
+fit <- cvinecop_sensitive(data=u, 
+                          var_type=var_types,
+                          family_set=family_set,
+                          sensitive=sensitive,
+                          lmbda=lmbda)
 
 json_obj <- vinecop_to_json(fit)
 write(json_obj, file=model_path)
