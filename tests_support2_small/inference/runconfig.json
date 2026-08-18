@@ -1,12 +1,11 @@
 {
-  "sensitiveAttributes": {"totcst": "LinReg",
-    "crea": "LinReg"},
-  "nIter": 5,
+  "sensitiveAttributes": {"totcst": "LinReg", "crea": "LinReg"},
+  "nIter": 10,
   "sizeRawT": 500,
   "sizeSynT": 500,
-  "nSynT": 10,
+  "nSynT": 50,
   "nTargets": 0,
-  "Targets": ["ID447", "ID1124", "ID84"],
+  "Targets": ["ID84", "ID447"],
   "alpha":0.126,
   "generativeModels": {
     "IMRV": [
@@ -26,8 +25,8 @@
       ["all", 26]
     ],
     "PrivBayes": [[25, 1, 0.1]],
-    "CTGAN": [[300, 500]],
-    "TVAE": [[1500,400]]
+    "CTGAN": [[400, 100]],
+    "TVAE": [[800, 100]]
   }
 }
 

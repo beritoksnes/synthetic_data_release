@@ -472,7 +472,7 @@ class Cvine(GenerativeModel):
         self.trunc_lvl = trunc_lvl
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(len(metadata['columns']))]
         self.datatype = pd.DataFrame
-        self.__name__ = 'Cvine(trunc_lvl={self.trunc_lvl})'
+        self.__name__ = f'Cvine(trunc_lvl={self.trunc_lvl})'
         self.DataDescriber = None
         self.trained = False
 
