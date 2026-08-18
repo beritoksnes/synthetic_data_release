@@ -333,7 +333,7 @@ class PrivBayes(BayesianNet):
 
         self.epsilon = float(epsilon)
 
-        self.__name__ = f'PrivBayesEps{self.epsilon}'
+        self.__name__ = f'PrivBayes(epsilon={self.epsilon})'
 
     @property
     def laplace_noise_scale(self):
@@ -472,7 +472,7 @@ class Cvine(GenerativeModel):
         self.trunc_lvl = trunc_lvl
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(len(metadata['columns']))]
         self.datatype = pd.DataFrame
-        self.__name__ = 'Cvine'
+        self.__name__ = 'Cvine(trunc_lvl={self.trunc_lvl})'
         self.DataDescriber = None
         self.trained = False
 
@@ -552,7 +552,7 @@ class Cvine(GenerativeModel):
                     
             synth_data = pd.DataFrame(synth_data).transpose()
 
-            synth_data.columns = list(self.real_data) 
+            synth_data.columns = self.real_data.columns 
 
             convert_dict = {col: object if dtype == 'd' else float for col, dtype in zip(synth_data.columns, self.var_types)}
             synth_data = synth_data.astype(convert_dict)
@@ -589,6 +589,7 @@ class Cvine(GenerativeModel):
 # Added by me ####
 
 class CvineSensitive(GenerativeModel):
+    """A C-vine copula model putting penalties on sensitive parameters during estimation"""
     def __init__(self, 
                  metadata, 
                  family_set = "parametric",
@@ -598,7 +599,18 @@ class CvineSensitive(GenerativeModel):
                  histogram_bins = 45, 
                  infer_ranges = False, 
                  multiprocess = True):
-        """A C-vine copula model putting penalties on sensitive parameters during estimation"""
+        """_summary_
+
+        Args:
+            metadata (_type_): _description_
+            family_set (str, optional): _description_. Defaults to "parametric".
+            sensitive (_type_, optional): _description_. Defaults to None.
+            lmbda (int, optional): _description_. Defaults to 0.
+            trunc_lvl (_type_, optional): _description_. Defaults to None.
+            histogram_bins (int, optional): _description_. Defaults to 45.
+            infer_ranges (bool, optional): _description_. Defaults to False.
+            multiprocess (bool, optional): _description_. Defaults to True.
+        """
         self.metadata = self._read_meta(metadata)
         self.family_set = family_set
         self.sensitive = sensitive
@@ -612,73 +624,73 @@ class CvineSensitive(GenerativeModel):
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
 
         self.datatype = pd.DataFrame
-        self.__name__ = f'CvineSensitive({self.lmbda})'
+        self.__name__ = f'CvineSensitive(lmbda={self.lmbda}, trunc_lvl={self.trunc_lvl})'
         self.DataDescriber = None
         self.trained = False
 
     def fit(self, data):
-            """Fit model..."""
-            LOGGER.debug(f'Start fitting CVineSensitive({self.lmbda}) model to data of shape {data.shape}...')
+        """Fit model..."""
+        LOGGER.debug(f'Start fitting CVineSensitive({self.lmbda}) model to data of shape {data.shape}...')
 
-            self.real_data = data
+        self.real_data = data
 
-            # Fit model by calling R-script (add more documentation ASAP)
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp = Path(tmpdir)
-                data_path, params_path, model_path = tmp / "data.csv", tmp / "params.json", tmp / "model.json"
+        # Fit model by calling R-script (add more documentation ASAP)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            data_path, params_path, model_path = tmp / "data.csv", tmp / "params.json", tmp / "model.json"
     
-                # Export data to temporary csv file
-                data.to_csv(data_path, index=False)
+            # Export data to temporary csv file
+            data.to_csv(data_path, index=False)
     
-                # Export parameters to temporary json file
-                params = {"var_types":self.var_types,
-                          "family_set":self.family_set,
-                          "trunc_lvl":self.trunc_lvl,
-                          "sensitive":self.sensitive,
-                          "lmbda":self.lmbda}
-                params_path.write_text(json.dumps(params))
+            # Export parameters to temporary json file
+            params = {"var_types":self.var_types,
+                      "family_set":self.family_set,
+                      "trunc_lvl":self.trunc_lvl,
+                      "sensitive":self.sensitive,
+                      "lmbda":self.lmbda}
+            params_path.write_text(json.dumps(params))
     
-                # Run R code
-                cmd = ["Rscript",
-                       CVINE_SENSITIVE_SCRIPT,
-                       data_path,
-                       params_path,
-                       model_path]
+            # Run R code
+            cmd = ["Rscript",
+                    CVINE_SENSITIVE_SCRIPT,
+                    data_path,
+                    params_path,
+                    model_path]
     
-                result = subprocess.run(cmd, capture_output=True)
+            result = subprocess.run(cmd, capture_output=True)
     
-                if result.returncode != 0:
-                    raise RuntimeError(
-                        f"R estimation failed (exit {result.returncode}).\n"
-                        f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
-                    )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"R estimation failed (exit {result.returncode}).\n"
+                    f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
+                )
                   
-                self.vc = pv.Vinecop(d=self.d).from_json(model_path.read_text(encoding="utf-8"))
+            self.vc = pv.Vinecop(d=self.d).from_json(model_path.read_text(encoding="utf-8"))
     
-            LOGGER.debug(f'Finished fitting CVineSensitive({self.lmbda})')
-            self.trained = True
+        LOGGER.debug(f'Finished fitting CVineSensitive({self.lmbda})')
+        self.trained = True
 
     def generate_samples(self, nsamples):
-                """Generate samples from fitted C-vine model"""
-                u_synth = pv.Vinecop.simulate(self.vc, n=nsamples)
+        """Generate samples from fitted C-vine model"""
+        u_synth = pv.Vinecop.simulate(self.vc, n=nsamples)
                 
-                synth_data = []
-                for i in range(self.d):
-                    if self.var_types[i] == "c":
-                        s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'median_unbiased')
-                        synth_data.append(s)
-                    else:
-                        s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'closest_observation')
-                        synth_data.append(s)
+        synth_data = []
+        for i in range(self.d):
+            if self.var_types[i] == "c":
+                    s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'median_unbiased')
+                    synth_data.append(s)
+            else:
+                s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'closest_observation')
+                synth_data.append(s)
                         
-                synth_data = pd.DataFrame(synth_data).transpose()
+        synth_data = pd.DataFrame(synth_data).transpose()
     
-                synth_data.columns = list(self.real_data) 
+        synth_data.columns = self.real_data.columns
     
-                convert_dict = {col: object if dtype == 'd' else float for col, dtype in zip(synth_data.columns, self.var_types)}
-                synth_data = synth_data.astype(convert_dict)
+        convert_dict = {col: object if dtype == 'd' else float for col, dtype in zip(synth_data.columns, self.var_types)}
+        synth_data = synth_data.astype(convert_dict)
     
-                return synth_data     
+        return synth_data     
 
     def _read_meta(self, metadata):
             """ Read metadata from metadata file."""
@@ -708,7 +720,184 @@ class CvineSensitive(GenerativeModel):
             return metadict
 
 
+class IMRV(GenerativeModel):
+    def __init__(self,
+                 metadata,
+                 family_set = "parametric",
+                 sensitive = None,
+                 weight = 0,
+                 trunc_lvl = None,
+                 histogram_bins = 45,
+                 infer_ranges = False,
+                 multiprocess = True):
+        """An Independence Mixture R-Vine (IMRV) copula model
+
+        Args:
+            metadata (_type_): _description_
+            family_set (str, optional): _description_. Defaults to "parametric".
+            sensitive (_type_, optional): _description_. Defaults to None.
+            weight (int, optional): _description_. Defaults to 0.
+            trunc_lvl (_type_, optional): _description_. Defaults to None.
+            histogram_bins (int, optional): _description_. Defaults to 45.
+            infer_ranges (bool, optional): _description_. Defaults to False.
+            multiprocess (bool, optional): _description_. Defaults to True.
+        """
+        self.metadata = self._read_meta(metadata)
+        self.family_set = family_set
+        self.sensitive = sensitive
+        self.weight = weight 
+        self.histogram_bins = histogram_bins
+        self.multiprocess = bool(multiprocess)
+        self.infer_ranges = bool(infer_ranges)
+        
+        self.d = len(metadata['columns'])
+        self.trunc_lvl = trunc_lvl if trunc_lvl is not None else self.d - 1
+        self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
+        
+        self.datatype = pd.DataFrame
+        self.__name__ = f'IMRV(weight={self.weight}, trunc_lvl={self.trunc_lvl})'
+        self.DataDescriber = None
+        self.trained = False
+
+    def fit(self, data):
+        n = data.shape[0]
+        # Store real data for transformation of margins in generate_sampels function
+        self.real_data = data
+
+        # Get columns indices of sensitive variables
+        if len(set(self.sensitive).intersection(data.columns)) != len(self.sensitive):
+                    raise ValueError("Sensitive variables must be in data frame")
+        
+        sensitive_ind = []
+        if self.sensitive is not None:
+            sensitive_ind = [j+1 for j in range(self.d) if data.columns[j] in self.sensitive]
+
+        # Compute pseudo-observations     
+        u_data = []
+        for j in range(self.d):
+            if self.var_types[j] == "c":
+                u_data.append(scipy.stats.rankdata(data.iloc[:,j]))
+            else:
+                u_data.append(scipy.stats.rankdata(data.iloc[:,j], method="max"))
+
+        for j in range(self.d):
+            if self.var_types[j] == "d":
+                u_data.append(scipy.stats.rankdata(data.iloc[:,j], method="min")-1)
+            else:
+                pass            
+
+        u_data = np.array(u_data).transpose() * 1/(n+1)
+
+        # Set controls 
+        family_set_dict = {"all":pv.all, 
+                           "parametric":pv.parametric, 
+                           "one_par":pv.one_par, 
+                           "two_par":pv.two_par, 
+                           "three_par":pv.three_par, 
+                           "nonparametric":pv.nonparametric}
+
+        controls = pv.FitControlsVinecop(family_set=family_set_dict[self.family_set], trunc_lvl=self.trunc_lvl)
+        
+        # Fit vine copula model to data
+        self.vc0 = pv.Vinecop(d=self.d).from_data(u_data, controls=controls, var_types=self.var_types)
+
+        # Define independence mixture component
+        M = self.vc0.structure.matrix
+        pair_copulas1 = self.vc0.pair_copulas
+
+        for j in range(self.d-1):
+            for k in range(self.d-j-1):
+                conditioned = (M[j,k], M[self.d-k-1,k])
+                sensitive_dep = (conditioned[0] in sensitive_ind) or (conditioned[1] in sensitive_ind)
+                if sensitive_dep: # Replace "sensitive" pair copula with independence pair copula
+                    pair_copulas1[j][k] = pv.Bicop(pv.indep)
+
+        self.vc1 = pv.Vinecop(d=self.d).from_structure(structure=self.vc0.structure, 
+                                                       pair_copulas=pair_copulas1, 
+                                                       var_types=self.vc0.var_types)
+
+    def generate_samples(self, nsamples):
+        # Sample latent variables
+        c = np.random.choice([0,1], size=nsamples, replace=True, p=[1-self.weight,self.weight])
+        n1, n0 = c.sum(), nsamples - c.sum()
+
+        # Simulate from fitted vines conditional on latent variables
+        u_synth = np.zeros((nsamples, self.d))
+        u_synth[c==0,] = self.vc0.simulate(n0)
+        u_synth[c==1,] = self.vc1.simulate(n1)
+
+        # Back-transform margins
+        synth_data = []
+        for i in range(self.d):
+            if self.var_types[i] == "c":
+                s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'median_unbiased')
+                synth_data.append(s)
+            else:
+                s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'closest_observation')
+                synth_data.append(s)
+                                    
+        synth_data = pd.DataFrame(synth_data).transpose()
+        synth_data.columns = self.real_data.columns
+            
+        convert_dict = {col: object if dtype == 'd' else float for col, dtype in zip(synth_data.columns, self.var_types)}
+        synth_data = synth_data.astype(convert_dict)
+            
+        return synth_data
+             
+
+    def _read_meta(self, metadata):
+        """ Read metadata from metadata file."""
+        metadict = {}
+
+        for cdict in metadata['columns']:
+            col = cdict['name']
+            coltype = cdict['type']
+
+            if coltype == FLOAT or coltype == INTEGER:
+                metadict[col] = {
+                    'type': coltype,
+                    'min': cdict['min'],
+                    'max': cdict['max']
+                }
+
+            elif coltype == CATEGORICAL or coltype == ORDINAL:
+                metadict[col] = {
+                    'type': coltype,
+                    'categories': cdict['i2s'],
+                    'size': len(cdict['i2s'])
+                }
+
+            else:
+                raise ValueError(f'Unknown data type {coltype} for attribute {col}')
+
+        return metadict
 
 
+class CVCDA(GenerativeModel):
+    def __init__(self, 
+                 metadata, 
+                 family_set, 
+                 trunc_lvl = None,
+                 histogram_bins = 45,
+                 infer_ranges = False,
+                 multiprocess = True):
+        """A C-Vine Copula Discriminant Analysis (CVDA) model for categorical responses
 
+        Args:
+            metadata (_type_): _description_
+            family_set (_type_): _description_
+            trunc_lvl (_type_, optional): _description_. Defaults to None.
+            histogram_bins (int, optional): _description_. Defaults to 45.
+            infer_ranges (bool, optional): _description_. Defaults to False.
+            multiprocess (bool, optional): _description_. Defaults to True.
+        """
+        # TBD
+        return(0)
 
+    def fit(self, data):
+        # TBD
+        return(0)
+    
+    def generate_samples(self, nsamples):
+        #TBD
+        return(0)

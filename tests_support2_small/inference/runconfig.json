@@ -7,8 +7,24 @@
   "nSynT": 10,
   "nTargets": 0,
   "Targets": ["ID447", "ID1124", "ID84"],
+  "alpha":0.126,
   "generativeModels": {
-    "Cvine": [["parametric", 26]],
+    "IMRV": [
+      ["all", ["totcst", "crea"], 0.25],
+      ["all", ["totcst", "crea"], 0.5],
+      ["all", ["totcst", "crea"], 0.75]
+    ],
+    "CvineSensitive": [
+      ["all", ["totcst", "crea"], 5, 26]
+    ],
+    "Cvine": [
+      ["all", 1], 
+      ["all", 5],
+      ["all", 10],
+      ["all", 15],
+      ["all", 20],
+      ["all", 26]
+    ],
     "PrivBayes": [[25, 1, 0.1]],
     "CTGAN": [[300, 500]],
     "TVAE": [[1500,400]]

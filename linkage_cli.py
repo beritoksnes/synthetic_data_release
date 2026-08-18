@@ -28,7 +28,8 @@ from generative_models.data_synthesiser import (IndependentHistogram,
                                                 BayesianNet,
                                                 PrivBayes,
                                                 Cvine,
-                                                CvineSensitive)
+                                                CvineSensitive,
+                                                IMRV)
 
 from attack_models.mia_classifier import (MIAttackClassifierRandomForest,
                                           generate_mia_shadow_data,
@@ -124,6 +125,9 @@ def main():
             elif gm == 'CvineSensitive':
                 for params in paramsList:
                     gmList.append(CvineSensitive(metadata, *params))
+            elif gm == 'IMRV':
+                for params in paramsList:
+                    gmList.append(IMRV(metadata, *params))
             else:
                 raise ValueError(f'Unknown GM {gm}')
 

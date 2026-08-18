@@ -18,7 +18,9 @@ from sanitisation_techniques.sanitiser import SanitiserNHS
 from generative_models.data_synthesiser import (IndependentHistogram,
                                                 BayesianNet,
                                                 PrivBayes,
-                                                Cvine)
+                                                Cvine,
+                                                CvineSensitive,
+                                                IMRV)
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
 from generative_models.pate_gan import PATEGAN
@@ -118,6 +120,12 @@ def main():
             elif gm == 'Cvine':
                 for params in paramsList:
                     gmList.append(Cvine(metadata, *params))
+            elif gm == 'CvineSensitive':
+                for params in paramsList:
+                    gmList.append(CvineSensitive(metadata, *params))
+            elif gm == 'IMRV':
+                for params in paramsList:
+                    gmList.append(IMRV(metadata, *params))
             else:
                 raise ValueError(f'Unknown GM {gm}')
 

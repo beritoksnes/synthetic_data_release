@@ -7,6 +7,8 @@ import json
 import numpy as np
 import pandas as pd
 
+from sklearn.preprocessing import StandardScaler
+
 from os import mkdir, path
 from argparse import ArgumentParser
 
@@ -18,13 +20,16 @@ from utils.constants import *
 from generative_models.data_synthesiser import (IndependentHistogram, 
                                                 BayesianNet, 
                                                 PrivBayes,
-                                                Cvine)
+                                                Cvine,
+                                                CvineSensitive,
+                                                IMRV)
 from generative_models.pate_gan import PATEGAN
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
 
 from sanitisation_techniques.sanitiser import SanitiserNHS
 from attack_models.reconstruction import LinRegAttack, RandForestAttack
+from utils.evaluation_framework import standardize_before_AIA
 
 from warnings import simplefilter
 simplefilter('ignore', category=FutureWarning)
@@ -70,14 +75,19 @@ def main():
     ########################
     #### GAME INPUTS #######
     ########################
+    # Standardize rawPop
+    scaler = StandardScaler()
+    standRawPop = standardize_before_AIA(rawPop, metadata, scaler)
+
     # Pick targets
     targetIDs = np.random.choice(list(rawPop.index), size=runconfig['nTargets'], replace=False).tolist()
 
     # If specified: Add specific target records
     if runconfig['Targets'] is not None:
         targetIDs.extend(runconfig['Targets'])
-
+    
     targets = rawPop.loc[targetIDs, :]
+    standTargets = standRawPop.loc[targetIDs, :]
 
     # Drop targets from population
     rawPopDropTargets = rawPop.drop(targetIDs)
@@ -108,6 +118,12 @@ def main():
             elif gm == 'Cvine':
                 for params in paramsList:
                     gmList.append(Cvine(metadata, *params))
+            elif gm == 'CvineSensitive':
+                for params in paramsList:
+                    gmList.append(CvineSensitive(metadata, *params))
+            elif gm == 'IMRV':
+                for params in paramsList:
+                    gmList.append(IMRV(metadata, *params))
             else:
                 raise ValueError(f'Unknown GM {gm}')
 
@@ -130,6 +146,10 @@ def main():
         for sa in runconfig['sensitiveAttributes']:
             resultsTargetPrivacy[tid][sa]['Raw'] = {}
 
+    # For checking regression coefficients
+    column_names = [f'b{i}' for i in range(rawPop.shape[1])] + ["sa", "tid", "genModel"]
+    regCoeff = []
+
     print('\n---- Start the game ----')
     for nr in range(runconfig['nIter']):
         print(f'\n--- Game iteration {nr + 1} ---')
@@ -147,24 +167,17 @@ def main():
             elif atype == 'Classification':
                 attacks[sa] = RandForestAttack(sensitiveAttribute=sa, metadata=metadata)
 
-        #### Assess advantage raw
         for sa, Attack in attacks.items():
-            Attack.train(rawTout)
-
             for tid in targetIDs:
-                target = targets.loc[[tid]]
-                targetAux = target.loc[[tid], Attack.knownAttributes]
-                targetSecret = target.loc[tid, Attack.sensitiveAttribute]
-
-                guess = Attack.attack(targetAux, attemptLinkage=True, data=rawTout)
-                pCorrect = Attack.get_likelihood(targetAux, targetSecret, attemptLinkage=True, data=rawTout)
-
                 resultsTargetPrivacy[tid][sa]['Raw'][nr] = {
-                    'AttackerGuess': [guess],
-                    'ProbCorrect': [pCorrect],
-                    'TargetPresence': [LABEL_OUT]
+                    'AttackerGuess': [],
+                    'ProbCorrect': [],
+                    'MSE': [],
+                    'TargetPresence': [LABEL_OUT for _ in range(runconfig['nSynT'])]
                 }
 
+                
+        #### Assess advantage raw
         for tid in targetIDs:
             target = targets.loc[[tid]]
             rawTin = pd.concat([rawTout, target], ignore_index=True)
@@ -173,11 +186,13 @@ def main():
                 targetAux = target.loc[[tid], Attack.knownAttributes]
                 targetSecret = target.loc[tid, Attack.sensitiveAttribute]
 
-                guess = Attack.attack(targetAux, attemptLinkage=True, data=rawTin)
-                pCorrect = Attack.get_likelihood(targetAux, targetSecret, attemptLinkage=True, data=rawTin)
+                guess = targetSecret
+                pCorrect = 1
+                mse = 0
 
                 resultsTargetPrivacy[tid][sa]['Raw'][nr]['AttackerGuess'].append(guess)
                 resultsTargetPrivacy[tid][sa]['Raw'][nr]['ProbCorrect'].append(pCorrect)
+                resultsTargetPrivacy[tid][sa]['Raw'][nr]['MSE'].append(mse) # Do we need this??
                 resultsTargetPrivacy[tid][sa]['Raw'][nr]['TargetPresence'].append(LABEL_IN)
 
         ##### Assess advantage Syn
@@ -196,19 +211,23 @@ def main():
                     resultsTargetPrivacy[tid][sa][GenModel.__name__][nr] = {
                         'AttackerGuess': [],
                         'ProbCorrect': [],
+                        'MSE': [],
                         'TargetPresence': [LABEL_OUT for _ in range(runconfig['nSynT'])]
                     }
 
                 for syn in synTwithoutTarget:
-                    Attack.train(syn)
+                    standSyn = standardize_before_AIA(syn, metadata, scaler)
+                    assert not standSyn.isna().any().any()
+                    Attack.train(standSyn)
 
                     for tid in targetIDs:
-                        target = targets.loc[[tid]]
+                        target = standTargets.loc[[tid]]
                         targetAux = target.loc[[tid], Attack.knownAttributes]
                         targetSecret = target.loc[tid, Attack.sensitiveAttribute]
 
                         guess = Attack.attack(targetAux)
-                        pCorrect = Attack.get_likelihood(targetAux, targetSecret)
+                        pCorrect = int(targetSecret - runconfig["alpha"] < guess < targetSecret + runconfig["alpha"] )
+                        mse = (guess - targetSecret)**2
 
                         resultsTargetPrivacy[tid][sa][GenModel.__name__][nr]['AttackerGuess'].append(guess)
                         resultsTargetPrivacy[tid][sa][GenModel.__name__][nr]['ProbCorrect'].append(pCorrect)
@@ -219,7 +238,7 @@ def main():
                 LOGGER.info(f'Target: {tid}')
                 target = targets.loc[[tid]]
                 rawTin = pd.concat([rawTout, target], ignore_index=True)
-
+                rawTin['Y'] = rawTin['Y'].astype(str) # for classification, check if it works for regression ...
                 GenModel.fit(rawTin)
 
                 if "PrivPGD" in GenModel.__name__:
@@ -234,16 +253,27 @@ def main():
                     targetSecret = target.loc[tid, Attack.sensitiveAttribute]
 
                     for syn in synTwithTarget:
-                        Attack.train(syn)
+                        standSyn = standardize_before_AIA(syn, metadata, scaler)
+                        assert not standSyn.isna().any().any()
 
+                        Attack.train(standSyn)
+
+                        # For checking regression coefficients
+                        new_row = np.append(Attack.coefficients, [sa, tid, GenModel.__name__])
+                        regCoeff.append(new_row)
+                        
                         guess = Attack.attack(targetAux)
-                        pCorrect = Attack.get_likelihood(targetAux, targetSecret)
+                        pCorrect = int( targetSecret - runconfig["alpha"] < guess < targetSecret + runconfig["alpha"] )
+                        mse = (guess - targetSecret)**2
 
                         resultsTargetPrivacy[tid][sa][GenModel.__name__][nr]['AttackerGuess'].append(guess)
                         resultsTargetPrivacy[tid][sa][GenModel.__name__][nr]['ProbCorrect'].append(pCorrect)
+                        resultsTargetPrivacy[tid][sa][GenModel.__name__][nr]['MSE'].append(mse)
                         resultsTargetPrivacy[tid][sa][GenModel.__name__][nr]['TargetPresence'].append(LABEL_IN)
             del synTwithTarget
 
+
+        ##### Assess advantage San
         for San in sanList:
             LOGGER.info(f'Start: Evaluation for sanitiser {San.__name__}...')
             attacks = {}
@@ -282,7 +312,6 @@ def main():
                     targetAux = target.loc[[tid], Attack.knownAttributes]
                     targetSecret = target.loc[tid, Attack.sensitiveAttribute]
 
-
                     Attack.train(sanIn)
 
                     guess = Attack.attack(targetAux, attemptLinkage=True, data=sanIn)
@@ -294,6 +323,10 @@ def main():
 
     outfile = f"ResultsMLEAI_{dname}"
     LOGGER.info(f"Write results to {path.join(f'{args.outdir}', f'{outfile}')}")
+
+    # For saving regression coefficients
+    regCoeff = pd.DataFrame(regCoeff, columns=column_names)
+    regCoeff.to_csv(f"{args.outdir}/reg_coeff_{attacks.keys()}.csv", index=False)
 
     with open(path.join(f'{args.outdir}', f'{outfile}.json'), 'w') as f:
         json.dump(resultsTargetPrivacy, f, indent=2, default=json_numpy_serialzer)
