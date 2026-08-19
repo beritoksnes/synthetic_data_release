@@ -25,7 +25,7 @@ class TVAE(GenerativeModel):
                  decompress_dims=(128, 128),
                  l2scale=1e-5,
                  loss_factor=2,
-                 verbose=True,
+                 verbose=False,
                  multiprocess=False,
                  cuda=True):
         

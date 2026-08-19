@@ -461,16 +461,19 @@ class DataDescriber(object):
 class Cvine(GenerativeModel):
     def __init__(self, 
                  metadata, 
-                 pc_estimation = "parametric", 
-                 trunc_lvl = 1000000, 
+                 family_set = "all", 
+                 trunc_lvl = None, 
                  histogram_bins = 45, 
                  infer_ranges = False, 
                  multiprocess = True):
         self.metadata = self._read_meta(metadata)
         self.histogram_bins = histogram_bins
-        self.pc_estimation = pc_estimation
-        self.trunc_lvl = trunc_lvl
-        self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(len(metadata['columns']))]
+        self.family_set = family_set
+
+        self.d = len(metadata['columns'])
+        self.trunc_lvl = trunc_lvl if trunc_lvl is not None else self.d - 1  
+        self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
+
         self.datatype = pd.DataFrame
         self.__name__ = f'Cvine(trunc_lvl={self.trunc_lvl})'
         self.DataDescriber = None
@@ -490,17 +493,17 @@ class Cvine(GenerativeModel):
         data = pd.DataFrame(data)
         
         self.real_data = data
-        n, d = data.shape
+        n = data.shape[0]
         
         # transform data to unit cube
         u_data = []
-        for i in range(d):
+        for i in range(self.d):
             if self.var_types[i] == "c":
                 u_data.append(scipy.stats.rankdata(data.iloc[:,i]))
             else:
                 u_data.append(scipy.stats.rankdata(data.iloc[:,i], method = "max"))
                 
-        for i in range(d):
+        for i in range(self.d):
             if self.var_types[i] == "d":
                 u_data.append(scipy.stats.rankdata(data.iloc[:,i], method = "min") - 1) 
             else:
@@ -509,40 +512,32 @@ class Cvine(GenerativeModel):
         u_data = np.array(u_data).transpose() * 1/(n+1)
 
         # set vine tree structure
-        structure = pv.CVineStructure(order = range(1,d+1,1), trunc_lvl = self.trunc_lvl)      
+        structure = pv.CVineStructure(order = range(1,self.d+1,1), trunc_lvl = self.trunc_lvl)      
         
-        # setting controls        
-        if self.pc_estimation == "parametric":
-            controls = pv.FitControlsVinecop(family_set = pv.parametric, 
-                                         trunc_lvl = self.trunc_lvl, 
-                                         parametric_method = 'mle', 
-                                         selection_criterion = 'aic')
-        elif self.pc_estimation == "nonparametric":
-            controls = pv.FitControlsVinecop(family_set = pv.nonparametric, 
-                                             nonparametric_method = "linear", 
-                                             trunc_lvl = self.trunc_lvl, 
-                                             selection_criterion = 'aic')
-        else:
-            controls = pv.FitControlsVinecop(nonparametric_method = "linear",
-                                             parametric_method = "mle", 
-                                             trunc_lvl = self.trunc_lvl, 
-                                             selection_criterion = 'aic')
+        # set controls        
+        family_set_dict = {"all":pv.all,
+                           "parametric":pv.parametric,
+                           "one_par":pv.one_par,
+                           "two_par":pv.two_par,
+                           "three_par":pv.three_par,
+                           "nonparametric":pv.nonparametric}
+        
+        controls = pv.FitControlsVinecop(family_set=family_set_dict[self.family_set], 
+                                         trunc_lvl=self.trunc_lvl)
 
         # fit C-vine
-        self.vine = pv.Vinecop(d=d).from_data(data = u_data,
-                                              structure = structure,
-                                              var_types = self.var_types,
-                                              controls = controls)
+        self.vine = pv.Vinecop(d=self.d).from_data(data = u_data,
+                                                   structure = structure,
+                                                   var_types = self.var_types,
+                                                   controls = controls)
     
     
     def generate_samples(self, nsamples):
             """Generate samples from fitted C-vine model"""
-            u_synth = pv.Vinecop.simulate(self.vine, n=nsamples)
-            
-            n, d = u_synth.shape
-            
+            u_synth = pv.Vinecop.simulate(self.vine, n=nsamples)            
+
             synth_data = []
-            for i in range(d):
+            for i in range(self.d):
                 if self.var_types[i] == "c":
                     s = np.quantile(a = self.real_data.iloc[:,i], q = u_synth[:,i], method = 'median_unbiased')
                     synth_data.append(s)

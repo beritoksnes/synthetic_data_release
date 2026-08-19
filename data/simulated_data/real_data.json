@@ -121,7 +121,7 @@
       "max": 24.3352520622066
     },
     {
-      "name": "y",
+      "name": "Y",
       "type": "Categorical",
       "size": 2,
       "i2s": [

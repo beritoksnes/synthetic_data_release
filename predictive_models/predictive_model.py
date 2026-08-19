@@ -1,10 +1,18 @@
 """ Some predictive models to represent a simple analysis task. """
+import numpy as np
+import pandas as pd
+
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from pandas import DataFrame
-from numpy import empty, true_divide, zeros, arange
+from sklearn.metrics import (accuracy_score, 
+                             balanced_accuracy_score, 
+                             f1_score,
+                             roc_auc_score, 
+                             average_precision_score,
+                             mean_squared_error, 
+                             mean_absolute_error)
 
 from utils.logging import LOGGER
 from utils.constants import *
@@ -24,7 +32,7 @@ class PredictiveModel(object):
         self.ImputerCat = SimpleImputer(strategy='most_frequent')
         self.ImputerNum = SimpleImputer(strategy='median')
 
-        self.datatype = DataFrame
+        self.datatype = pd.DataFrame
         self.trained = False
 
     def train(self, data):
@@ -38,7 +46,7 @@ class PredictiveModel(object):
 
     def _encode_data(self, data):
         n_samples = len(data)
-        features_encoded = empty((n_samples, self.nfeatures))
+        features_encoded = np.empty((n_samples, self.nfeatures))
         cidx = 0
 
         for cdict in self.metadata['columns']:
@@ -50,7 +58,7 @@ class PredictiveModel(object):
                 if data_type == FLOAT or data_type == INTEGER:
                     col_max = cdict['max']
                     col_min = cdict['min']
-                    features_encoded[:, cidx] = true_divide(col_data - col_min, col_max + ZERO_TOL)
+                    features_encoded[:, cidx] = np.true_divide(col_data - col_min, col_max + ZERO_TOL)
                     cidx += 1
 
                 elif data_type == CATEGORICAL or data_type == ORDINAL:
@@ -120,9 +128,9 @@ class PredictiveModel(object):
         return dfImpute
 
     def _one_hot(self, col_data, categories):
-        col_data_onehot = zeros((len(col_data), len(categories)))
+        col_data_onehot = np.zeros((len(col_data), len(categories)))
         cidx = [categories.index(c) for c in col_data]
-        col_data_onehot[arange(len(col_data)), cidx] = 1
+        col_data_onehot[np.arange(len(col_data)), cidx] = 1
 
         return col_data_onehot
 
@@ -177,6 +185,76 @@ class ClassificationTask(PredictiveModel):
 
         return [int(l == p) for l, p in zip(labelsTrue, labelsPred)]
 
+    def _predict_proba_full(self, features):
+        """ Probability matrix over the *full* label space from metadata.
+
+        Distinguisher.classes_ only holds the classes actually seen during
+        training, which can be a strict subset when training on synthetic
+        data that failed to reproduce a rare class. Columns for unseen
+        classes are filled with zeros, so rows still sum to 1.
+        """
+        allCodes = sorted(self.labelsInv.keys())
+        probaSeen = self.Distinguisher.predict_proba(features)
+
+        proba = np.zeros((features.shape[0], len(allCodes)))
+        for j, code in enumerate(self.Distinguisher.classes_):
+            proba[:, allCodes.index(code)] = probaSeen[:, j]
+
+        return proba, allCodes
+
+    def get_metrics(self, data, posLabel=None):
+        """ Aggregate performance metrics on a held-out set.
+
+        :param data: DataFrame: Evaluation data (real test set)
+        :param posLabel: The positive class for binary metrics. Defaults to
+                         the second category in metadata['i2s'].
+        :return: dict: metric name -> scalar
+        """
+        if not isinstance(data, self.datatype):
+            raise ValueError(f"Model expects input as {self.datatype} but got {type(data)}")
+
+        if not self.trained:
+            raise RuntimeError('Model must be trained before evaluation')
+
+        features = self._encode_data(data.drop(self.labelCol, axis=1))
+        labelsTrue = data[self.labelCol].apply(lambda x: self.labels[x]).values
+        labelsPred = self.Distinguisher.predict(features)
+        proba, allCodes = self._predict_proba_full(features)
+
+        results = {
+            'Accuracy': accuracy_score(labelsTrue, labelsPred),
+            'BalancedAccuracy': balanced_accuracy_score(labelsTrue, labelsPred),
+            'nClassesTrain': len(self.Distinguisher.classes_),
+        }
+
+        if len(allCodes) == 2:
+            posCode = self.labels[posLabel] if posLabel is not None else allCodes[1]
+            binTrue = (labelsTrue == posCode).astype(int)
+            scores = proba[:, allCodes.index(posCode)]
+
+            results['F1'] = f1_score(labelsTrue, labelsPred, pos_label=posCode,
+                                     zero_division=0)
+            if 0 < binTrue.sum() < len(binTrue):
+                results['AUC-ROC'] = roc_auc_score(binTrue, scores)
+                results['AUC-PR'] = average_precision_score(binTrue, scores)
+            else:
+                results['AUC-ROC'] = np.nan   # only one class present in test set
+                results['AUC-PR'] = np.nan
+        else:
+            results['F1'] = f1_score(labelsTrue, 
+                                     labelsPred, 
+                                     average='macro',
+                                     zero_division=0)
+            
+            aucs = []
+            for code in allCodes:
+                binTrue = (labelsTrue == code).astype(int)
+                if 0 < binTrue.sum() < len(binTrue):
+                    aucs.append(roc_auc_score(binTrue, proba[:, allCodes.index(code)]))
+            results['AUC-ROC'] = np.mean(aucs) if aucs else np.nan
+
+        return results
+
     def _get_accuracy(self, trueLabels, predLabels):
         return sum([g == l for g, l in zip(trueLabels, predLabels)])/len(trueLabels)
 
@@ -200,7 +278,7 @@ class LogRegClassTask(ClassificationTask):
 
 
 class RegressionTask(PredictiveModel):
-    """ A binary or multiclass classification model. """
+    """ A regression model. """
 
     def __init__(self, Regressor, metadata, labelCol):
         """
@@ -246,6 +324,20 @@ class RegressionTask(PredictiveModel):
         labelsPred = self.Regressor.predict(features)
 
         return [true - pred for true, pred in zip(labelsTrue, labelsPred)]
+
+    def get_metrics(self, data):
+        if not isinstance(data, self.datatype):
+            raise ValueError(f"Model expects input as {self.datatype} but got {type(data)}")
+
+        if not self.trained:
+            raise RuntimeError('Model must be trained before evaluation')
+
+        features = self._encode_data(data.drop(self.labelCol, axis=1))
+        labelsTrue = data[self.labelCol].values
+        labelsPred = self.Regressor.predict(features)
+
+        return {'MSE': mean_squared_error(labelsTrue, labelsPred),
+                'MAE': mean_absolute_error(labelsTrue, labelsPred)}
 
 
 class LinRegTask(RegressionTask):

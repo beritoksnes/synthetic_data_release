@@ -1,0 +1,31 @@
+{
+  "sensitiveAttributes": {"x1": "LinReg", "x6": "LinReg", "x12":"LinReg"},
+  "nIter": 10,
+  "sizeRawT": 500,
+  "sizeSynT": 500,
+  "nSynT": 50,
+  "nTargets": 0,
+  "Targets": ["ID84", "ID447"],
+  "alpha":0.126,
+  "generativeModels": {
+    "IMRV": [
+      ["all", ["x1", "x6", "x12"], 0.25],
+      ["all", ["x1", "x6", "x12"], 0.5],
+      ["all", ["x1", "x6", "x12"], 0.75]
+    ],
+    "CvineSensitive": [
+      ["all", ["x1", "x6", "x12"], 5, 26]
+    ],
+    "Cvine": [
+      ["all", 1], 
+      ["all", 5],
+      ["all", 10],
+      ["all", 15],
+      ["all", 21]
+    ],
+    "PrivBayes": [[25, 1, 0.1]],
+    "CTGAN": [[400, 100]],
+    "TVAE": [[800, 100]]
+  }
+}
+
