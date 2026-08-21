@@ -1,0 +1,3 @@
+[submodule "private-pgd"]
+	path = private-pgd
+	url = https://github.com/beritoksnes/private-pgd.git
