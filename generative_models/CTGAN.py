@@ -43,7 +43,7 @@ class CTGAN(GenerativeModel):
         self.infer_ranges = True
         self.trained = False
 
-        self.__name__ = f'CTGAN(epochs={self.epochs}, batch_size={self.batch_size})'
+        self.__name__ = f'CTGAN({self.epochs}, {self.batch_size})'
 
     def fit(self, data):
         """Train a generative adversarial network on tabular data.

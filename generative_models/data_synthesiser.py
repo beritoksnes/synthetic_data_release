@@ -333,7 +333,7 @@ class PrivBayes(BayesianNet):
 
         self.epsilon = float(epsilon)
 
-        self.__name__ = f'PrivBayes(epsilon={self.epsilon})'
+        self.__name__ = f'PrivBayes({self.epsilon})'
 
     @property
     def laplace_noise_scale(self):
@@ -475,7 +475,7 @@ class Cvine(GenerativeModel):
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
 
         self.datatype = pd.DataFrame
-        self.__name__ = f'Cvine(trunc_lvl={self.trunc_lvl})'
+        self.__name__ = f'Cvine({self.trunc_lvl})'
         self.DataDescriber = None
         self.trained = False
 
@@ -619,7 +619,7 @@ class CvineSensitive(GenerativeModel):
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
 
         self.datatype = pd.DataFrame
-        self.__name__ = f'CvineSensitive(lmbda={self.lmbda}, trunc_lvl={self.trunc_lvl})'
+        self.__name__ = f'CvineSensitive({self.lmbda}, {self.trunc_lvl})'
         self.DataDescriber = None
         self.trained = False
 
@@ -750,7 +750,7 @@ class IMRV(GenerativeModel):
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
         
         self.datatype = pd.DataFrame
-        self.__name__ = f'IMRV(weight={self.weight}, trunc_lvl={self.trunc_lvl})'
+        self.__name__ = f'IMRV({self.weight}, {self.trunc_lvl})'
         self.DataDescriber = None
         self.trained = False
 

@@ -44,7 +44,7 @@ class TVAE(GenerativeModel):
         self.datatype = pd.DataFrame
         self.infer_ranges = True
         self.trained = False
-        self.__name__ = f'TVAE(epochs={self.epochs}, batch_size={self.batch_size})'
+        self.__name__ = f'TVAE({self.epochs}, {self.batch_size})'
 
     def fit(self, data, *args):
         """Train a tabular variational autoencoder."""

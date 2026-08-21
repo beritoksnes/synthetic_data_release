@@ -24,6 +24,7 @@ from sanitisation_techniques.sanitiser import SanitiserNHS
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
 from generative_models.pate_gan import PATEGAN
+from generative_models.PRIVPGD import PrivPGD
 from generative_models.data_synthesiser import (IndependentHistogram,
                                                 BayesianNet,
                                                 PrivBayes,
@@ -119,6 +120,9 @@ def main():
             elif gm == 'TVAE':
                 for params in paramsList:
                     gmList.append(TVAE(metadata, *params))
+            elif gm == 'PrivPGD':
+                for params in paramsList:
+                    gmList.append(PrivPGD(metadata, *params))
             elif gm == 'Cvine':
                 for params in paramsList:
                     gmList.append(Cvine(metadata, *params))
