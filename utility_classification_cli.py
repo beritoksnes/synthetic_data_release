@@ -56,10 +56,12 @@ def main():
     if args.s3name is not None:
         rawPop, metadata = load_s3_data_as_df(args.s3name)
         dname = args.s3name
+        
     else:
         rawPop, metadata = load_local_data_as_df(path.join(cwd, args.datapath))
         dname = args.datapath.split('/')[-1]
-
+    
+    n, d = rawPop.shape
     print(f'Loaded data {dname}:')
     print(rawPop.info())
 
@@ -70,10 +72,6 @@ def main():
     ########################
     #### GAME INPUTS #######
     ########################
-    # Train test split
-    train_ind = np.random.choice([True, False], rawPop.shape[0], replace=True, p=[0.7,0.3])
-    rawTrain = rawPop.iloc[train_ind]
-    rawTest = rawPop.iloc[~train_ind]
 
     # List of candidate generative models to evaluate
     gmList = []
@@ -126,28 +124,34 @@ def main():
     ######### EVALUATION #############
     ##################################
     keys = ["Raw"] + [gm.__name__ for gm in gmList]
-    results = {k: {m: None for m in ['Accuracy', 'F1', 'AUC-ROC', 'AUC-PR']} for k in keys}
+    results = {k: {m: np.zeros(runconfig['nIter']) for m in ['Accuracy', 'F1', 'AUC-ROC', 'AUC-PR']} for k in keys}
 
-    # Train on real test on real data
-    um.train(rawTrain)
-    rawMetrics = um.get_metrics(rawTest)
-    results['Raw']['Accuracy'] = rawMetrics['Accuracy']
-    results['Raw']['F1'] = rawMetrics['F1']
-    results['Raw']['AUC-ROC'] = rawMetrics['AUC-ROC']
-    results['Raw']['AUC-PR'] = rawMetrics['AUC-PR']
+    for nr in range(runconfig["nIter"]):
+        # Draw bootstrap sample
+        idx = np.random.choice(range(n), runconfig["sizeRawT"], replace=False)
+        rawTrain = rawPop.iloc[idx] # reference data set 
+        rawTest = rawPop.iloc[~idx]  # test data set
 
-    # Iterate over generative models
-    for gm in gmList:
-        # Fit generative model and simulate synthetic data
-        gm.fit(rawTrain)
-        synData = gm.generate_samples(runconfig['sizeSynT'])
-        # Train on synthetic test on real data
-        um.train(synData)
-        synMetrics = um.get_metrics(rawTest)
-        results[gm.__name__]['Accuracy'] = synMetrics['Accuracy']
-        results[gm.__name__]['F1'] = synMetrics['F1']
-        results[gm.__name__]['AUC-ROC'] = synMetrics['AUC-ROC']
-        results[gm.__name__]['AUC-PR'] = synMetrics['AUC-PR']
+        # Train on real test on real data
+        um.train(rawTrain)
+        rawMetrics = um.get_metrics(rawTest)
+        results['Raw']['Accuracy'][nr] = rawMetrics['Accuracy']
+        results['Raw']['F1'][nr] = rawMetrics['F1']
+        results['Raw']['AUC-ROC'][nr] = rawMetrics['AUC-ROC']
+        results['Raw']['AUC-PR'][nr] = rawMetrics['AUC-PR']
+
+        # Iterate over generative models
+        for gm in gmList:
+            # Fit generative model and simulate synthetic data
+            gm.fit(rawTrain)
+            synData = gm.generate_samples(runconfig['sizeSynT'])
+            # Train on synthetic test on real data
+            um.train(synData)
+            synMetrics = um.get_metrics(rawTest)
+            results[gm.__name__]['Accuracy'][nr] = synMetrics['Accuracy']
+            results[gm.__name__]['F1'][nr] = synMetrics['F1']
+            results[gm.__name__]['AUC-ROC'][nr] = synMetrics['AUC-ROC']
+            results[gm.__name__]['AUC-PR'][nr] = synMetrics['AUC-PR']
 
 
     ##################################

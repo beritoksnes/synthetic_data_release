@@ -1,6 +1,7 @@
 {
+  "nIter": 50,
+  "sizeRawT": 500,
   "sizeSynT": 500,
-  "nTargets": 0,
   "generativeModels": {
     "IMRV": [
       ["all", ["x1", "x6", "x12"], 0.25],
