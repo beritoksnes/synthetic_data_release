@@ -871,28 +871,129 @@ class IMRV(GenerativeModel):
 class CVCDA(GenerativeModel):
     def __init__(self, 
                  metadata, 
-                 family_set, 
+                 family_set = "all", 
                  trunc_lvl = None,
                  histogram_bins = 45,
                  infer_ranges = False,
                  multiprocess = True):
-        """A C-Vine Copula Discriminant Analysis (CVDA) model for categorical responses
+        """A C-Vine Copula Discriminant Analysis (CVDA) model for categorical responses"""
 
-        Args:
-            metadata (_type_): _description_
-            family_set (_type_): _description_
-            trunc_lvl (_type_, optional): _description_. Defaults to None.
-            histogram_bins (int, optional): _description_. Defaults to 45.
-            infer_ranges (bool, optional): _description_. Defaults to False.
-            multiprocess (bool, optional): _description_. Defaults to True.
-        """
-        # TBD
-        return(0)
+        self.metadata = self._read_meta(metadata)
+        self.family_set = family_set
+        self.histogram_bins = histogram_bins
+        self.multiprocess = bool(multiprocess)
+        self.infer_ranges = bool(infer_ranges)
+        
+        self.d = len(metadata['columns'])
+        self.trunc_lvl = trunc_lvl if trunc_lvl is not None else self.d - 1
+        self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
+        
+        self.datatype = pd.DataFrame
+        self.__name__ = f'CVCDA({self.trunc_lvl})'
+        self.DataDescriber = None
+        self.trained = False
 
     def fit(self, data):
-        # TBD
-        return(0)
+        """Fit separate C-vine copula models for each class"""
+        LOGGER.debug(f'Start fitting CVCDA({self.trunc_lvl}) model to data of shape {data.shape}...')
+        self.real_data = data
+
+        # Data prep
+        p = data.shape[1] - 1
+        y = data['Y'].astype("int")
+        n = [data.shape[0]-y.sum(), y.sum()]
+        self.pi_Y = y.mean()
+
+        # Compute pseudo-observations     
+        u_data = []
+        for k in [0, 1]:
+            u = []
+            for j in range(p):
+                if self.var_types[j] == "c":
+                    u.append(scipy.stats.rankdata(data.loc[y==k,data.columns[j]]))
+                else:
+                    u.append(scipy.stats.rankdata(data.loc[y==k,data.columns[j]], method="max"))
+            
+            for j in range(p):
+                if self.var_types[j] == "d":
+                    u.append(scipy.stats.rankdata(data.loc[y==k,data.columns[j]], method="min")-1)
+                else:
+                    pass            
+            u = np.array(u).transpose() * 1/(n[k]+1)
+            u_data.append(u)
+
+        # Set controls
+        family_set_dict = {"all":pv.all,
+                           "parametric":pv.parametric,
+                            "one_par":pv.one_par,
+                            "two_par":pv.two_par,
+                            "three_par":pv.three_par,
+                            "nonparametric":pv.nonparametric}
+        
+        controls = pv.FitControlsVinecop(family_set=family_set_dict[self.family_set], trunc_lvl=self.trunc_lvl)
+
+        # Fit vine copula models
+        self.vc0 = pv.Vinecop(d=p).from_data(u_data[0],
+                                             structure = pv.CVineStructure(range(1,p+1)),
+                                             controls = controls,
+                                             var_types = self.var_types[:-1],)
+        self.vc1 = pv.Vinecop(d=p).from_data(u_data[1],
+                                             structure = pv.CVineStructure(range(1,p+1)),
+                                             controls = controls,
+                                             var_types = self.var_types[:-1],)
+
+        LOGGER.debug(f'Finished fitting CVCDA({self.trunc_lvl})')
+        self.trained = True
     
     def generate_samples(self, nsamples):
-        #TBD
-        return(0)
+        """Generate samples from fitted C-vine models"""
+        y_synth = np.random.choice([0,1], nsamples, replace=True, p=[1-self.pi_Y, self.pi_Y])
+        n = [nsamples-y_synth.sum(), y_synth.sum()]
+        vc = [self.vc0, self.vc1]
+
+        data_synth = pd.DataFrame(data=np.zeros((nsamples, self.d-1)),
+                                  columns=self.real_data.columns[:-1])
+        
+        for k in [0,1]:
+            u_synth = vc[k].simulate(n[k])
+            for j in range(self.d-1):
+                if self.var_types[j] == "c":
+                    s = np.quantile(a = self.real_data.loc[self.real_data["Y"]==str(k), self.real_data.columns[j]], 
+                                    q = u_synth[:,j], 
+                                    method = 'median_unbiased')
+                else: 
+                    s = np.quantile(a=self.real_data.loc[self.real_data["Y"]==str(k), self.real_data.columns[j]],
+                                    q = u_synth[:,j], 
+                                    method = 'closest_observation')
+                data_synth.loc[y_synth==k, data_synth.columns[j]] = s
+                
+        data_synth["Y"] = y_synth
+        data_synth["Y"] = data_synth["Y"].map({0:'0', 1:'1'})
+        
+        convert_dict = {col: object if dtype == 'd' else float for col, dtype in zip(data_synth.columns, self.var_types)}
+        data_synth = data_synth.astype(convert_dict)
+        
+        return data_synth
+
+    def _read_meta(self, metadata):
+        """ Read metadata from metadata file."""
+        metadict = {}
+    
+        for cdict in metadata['columns']:
+            col = cdict['name']
+            coltype = cdict['type']
+    
+            if coltype == FLOAT or coltype == INTEGER:
+                metadict[col] = {'type': coltype,
+                                 'min': cdict['min'],
+                                 'max': cdict['max']}
+    
+            elif coltype == CATEGORICAL or coltype == ORDINAL:
+                metadict[col] = {'type': coltype,
+                                 'categories': cdict['i2s'],
+                                 'size': len(cdict['i2s'])}
+    
+            else:
+                raise ValueError(f'Unknown data type {coltype} for attribute {col}')
+    
+        return metadict

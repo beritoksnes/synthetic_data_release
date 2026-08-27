@@ -8,6 +8,9 @@
   "Targets": ["ID84", "ID447"],
   "alpha":0.126,
   "generativeModels": {
+    "CVCDA": [
+      ["all"]
+    ],
     "IMRV": [
       ["all", ["x1", "x6", "x12"], 0.25],
       ["all", ["x1", "x6", "x12"], 0.5],

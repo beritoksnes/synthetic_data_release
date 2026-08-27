@@ -22,7 +22,8 @@ from generative_models.data_synthesiser import (IndependentHistogram,
                                                 PrivBayes,
                                                 Cvine,
                                                 CvineSensitive,
-                                                IMRV)
+                                                IMRV,
+                                                CVCDA)
 from generative_models.pate_gan import PATEGAN
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
@@ -128,6 +129,9 @@ def main():
             elif gm == 'IMRV':
                 for params in paramsList:
                     gmList.append(IMRV(metadata, *params))
+            elif gm == 'CVCDA':
+                for params in paramsList:
+                    gmList.append(CVCDA(metadata, *params))
             else:
                 raise ValueError(f'Unknown GM {gm}')
 

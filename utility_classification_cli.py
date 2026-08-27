@@ -20,7 +20,8 @@ from generative_models.data_synthesiser import (IndependentHistogram,
                                                 PrivBayes,
                                                 Cvine,
                                                 CvineSensitive,
-                                                IMRV)
+                                                IMRV,
+                                                CVCDA)
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
 from generative_models.pate_gan import PATEGAN
@@ -108,6 +109,9 @@ def main():
             elif gm == 'IMRV':
                 for params in paramsList:
                     gmList.append(IMRV(metadata, *params))
+            elif gm == 'CVCDA':
+                for params in paramsList:
+                    gmList.append(CVCDA(metadata, *params))
             else:
                 raise ValueError(f'Unknown GM {gm}')
 
@@ -129,8 +133,9 @@ def main():
     for nr in range(runconfig["nIter"]):
         # Draw bootstrap sample
         idx = np.random.choice(range(n), runconfig["sizeRawT"], replace=False)
-        rawTrain = rawPop.iloc[idx] # reference data set 
-        rawTest = rawPop.iloc[~idx]  # test data set
+        mask = np.zeros(n, dtype=bool)
+        mask[idx] = True
+        rawTrain, rawTest = rawPop.iloc[mask], rawPop.iloc[~mask]
 
         # Train on real test on real data
         um.train(rawTrain)
