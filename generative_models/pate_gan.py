@@ -9,7 +9,7 @@ import tensorflow.compat.v1 as tf
 tf.disable_v2_behavior()
 
 import numpy as np
-from pandas import DataFrame
+import pandas as pd
 
 from generative_models.generative_model import GenerativeModel
 from utils.logging import LOGGER
@@ -36,7 +36,7 @@ class PATEGAN(GenerativeModel):
         """
         # Data description
         self.metadata, self.attribute_list = self.read_meta(metadata)
-        self.datatype = DataFrame
+        self.datatype = pd.DataFrame
         self.nfeatures = self.get_num_features()
 
         # Privacy params
@@ -152,7 +152,7 @@ class PATEGAN(GenerativeModel):
 
     def fit(self, data):
         """Fit a generative model of the training data distribution.
-        :param data: DataFrame: Training set
+        :param data: pd.DataFrame: Training set
         """
         assert isinstance(data, self.datatype), f'{self.__class__.__name__} expects {self.datatype} as input data but got {type(data)}'
 
@@ -235,7 +235,7 @@ class PATEGAN(GenerativeModel):
         """""
         Samples synthetic data records from the fitted generative distribution
         :param nsamples: int: Number of synthetic records to generate
-        :return synData: DataFrame: A synthetic dataset
+        :return synData: pd.DataFrame: A synthetic dataset
         """
         with tf.device(self.device_spec.to_string()):
             # Output generation
@@ -312,7 +312,7 @@ class PATEGAN(GenerativeModel):
 
     def _decode_data(self, features_encoded):
         """ Revers feature encoding. """
-        data = DataFrame(columns=self.attribute_list)
+        data = pd.DataFrame(columns=self.attribute_list)
 
         cidx = 0
 

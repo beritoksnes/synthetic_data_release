@@ -1,9 +1,9 @@
 import json
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
 
 from glob import glob
-from pandas import DataFrame, concat
 from itertools import cycle
 from os import path
 
@@ -38,7 +38,7 @@ def load_results_linkage(dirname):
     """
     Helper function to load results of privacy evaluation under risk of linkability
     :param dirname: str: Directory that contains results files
-    :return: results: DataFrame: Results of privacy evaluation
+    :return: results: pd.DataFrame: Results of privacy evaluation
     """
 
     files = glob(path.join(dirname, f'ResultsMIA_*.json'))
@@ -54,7 +54,7 @@ def load_results_linkage(dirname):
             for gm, gmDict in tres.items():
                 for nr, nrDict in gmDict.items():
                     for fset, fsetDict in nrDict.items():
-                        df = DataFrame(fsetDict)
+                        df = pd.DataFrame(fsetDict)
 
                         df['Run'] = nr
                         df['FeatureSet'] = fset
@@ -64,7 +64,7 @@ def load_results_linkage(dirname):
 
                         resList.append(df)
 
-    results = concat(resList)
+    results = pd.concat(resList)
 
     resAgg = []
 
@@ -76,7 +76,7 @@ def load_results_linkage(dirname):
 
         resAgg.append(gameParams + (tpSyn, fpSyn, advantageSyn, advantageRaw))
 
-    resAgg = DataFrame(resAgg)
+    resAgg = pd.DataFrame(resAgg)
 
     resAgg.columns = ['TargetID','TargetModel', 'FeatureSet', 'Run', 'TPSyn', 'FPSyn', 'AdvantageSyn', 'AdvantageRaw']
 
@@ -90,7 +90,7 @@ def load_results_inference(dirname, dpath):
     Helper function to load results of privacy evaluation under risk of inference
     :param dirname: str: Directory that contains results files
     :param dpath: str: Dataset path (needed to extract some metadata)
-    :return: results: DataFrame: Results of privacy evaluation
+    :return: results: pd.DataFrame: Results of privacy evaluation
     """
     df, metadata = load_local_data_as_df(dpath)
 
@@ -119,7 +119,7 @@ def load_results_inference(dirname, dpath):
 
                 for gm, gdict in sdict.items():
                     for nr, res in gdict.items():
-                        resDF = DataFrame(res)
+                        resDF = pd.DataFrame(res)
                         resDF['TargetID'] = tid
                         resDF['TargetSecret'] = tsecret
                         resDF['SensitiveType'] = satype
@@ -130,7 +130,7 @@ def load_results_inference(dirname, dpath):
 
                         resList.append(resDF)
 
-    results = concat(resList)
+    results = pd.concat(resList)
 
     resAdv = []
     for gameParams, game in results.groupby(['Dataset', 'TargetID', 'SensitiveAttribute', 'Run']):
@@ -163,7 +163,7 @@ def load_results_inference(dirname, dpath):
                 resAdv.append(gameParams + (gm[0], pCorrectRIn, pCorrectROut, advR, pCorrectSIn, pCorrectSOut, advS))
 
 
-    resAdv = DataFrame(resAdv)
+    resAdv = pd.DataFrame(resAdv)
     resAdv.columns  =['Dataset', 'TargetID', 'SensitiveAttribute','Run', 'TargetModel',
                       'ProbCorrectRawIn', 'ProbCorrectRawOut', 'AdvantageRaw',
                       'ProbCorrectSynIn', 'ProbCorrectSynOut', 'AdvantageSyn']
@@ -176,8 +176,8 @@ def load_results_utility(dirname):
     """
     Helper function to load results of utility evaluation
     :param dirname: str: Directory that contains results files
-    :return: resultsTarget: DataFrame: Results of utility evaluation on individual records
-    :return: resultsAgg: DataFrame: Results of average utility evaluation
+    :return: resultsTarget: pd.DataFrame: Results of utility evaluation on individual records
+    :return: resultsAgg: pd.DataFrame: Results of average utility evaluation
     """
 
     # Load individual target utility results
@@ -203,7 +203,7 @@ def load_results_utility(dirname):
             for gm, gmres in ures.items():
                 for n, nres in gmres.items():
                     for tid, tres in nres.items():
-                        res = DataFrame(tres)
+                        res = pd.DataFrame(tres)
 
                         res['TargetID'] = tid
                         res['Run'] = f'Run {n}'
@@ -214,7 +214,7 @@ def load_results_utility(dirname):
 
                         resList.append(res)
 
-    resultsTargets = concat(resList)
+    resultsTargets = pd.concat(resList)
 
     # Load aggregate utility results
     files = glob(path.join(dirname, f'ResultsUtilAgg_*.json'))
@@ -237,7 +237,7 @@ def load_results_utility(dirname):
                 labelVar = ''.join([s.capitalize() for s in labelVar.split('-')])
 
             for gm, gmres in utres.items():
-                resDF = DataFrame(gmres)
+                resDF = pd.DataFrame(gmres)
                 resDF['PredictionModel'] = model
                 resDF['LabelVar'] = labelVar
                 resDF['TargetModel'] = gm
@@ -245,7 +245,7 @@ def load_results_utility(dirname):
 
                 resList.append(resDF)
 
-    resultsAgg = concat(resList)
+    resultsAgg = pd.concat(resList)
 
     return resultsTargets, resultsAgg
 

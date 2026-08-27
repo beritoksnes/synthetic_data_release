@@ -14,7 +14,7 @@ import sys
 from math import ceil, floor
  
 import numpy as np
-from pandas import DataFrame
+import pandas as pd
  
 from generative_models.generative_model import GenerativeModel
 from utils.constants import CATEGORICAL, ORDINAL, INTEGER, FLOAT
@@ -126,7 +126,7 @@ class PrivPGD(GenerativeModel):
         self.synt_weights = None
         self.loss = None
 
-        self.datatype = DataFrame
+        self.datatype = pd.DataFrame
         self.multiprocess = False
         self.infer_ranges = False
         self.trained = False
@@ -188,7 +188,7 @@ class PrivPGD(GenerativeModel):
                        / (enc['hi'] - enc['lo'])) * enc['size']
                 out[a] = np.clip(np.floor(pos), 0,
                                  enc['size'] - 1).astype(np.int64)
-        return DataFrame(out, columns=self.attrs)
+        return pd.DataFrame(out, columns=self.attrs)
  
     def _decode(self, codes, rng):
         out = {}
@@ -213,12 +213,12 @@ class PrivPGD(GenerativeModel):
                     out[a] = (lo_e + rng.random_sample(c.size)
                               * (hi_e - lo_e)) if self.dequantize \
                         else (lo_e + hi_e) / 2
-        return DataFrame(out, columns=self.attrs)
+        return pd.DataFrame(out, columns=self.attrs)
 
     def fit(self, data):
         """Fit PrivPGD to the input dataset and cache the particle model.
  
-        :param data: DataFrame: Training set
+        :param data: pd.DataFrame: Training set
         """
         assert isinstance(data, self.datatype), \
             f'{self.__class__.__name__} expects {self.datatype} as input data but got {type(data)}'

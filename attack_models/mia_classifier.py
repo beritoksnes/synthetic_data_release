@@ -1,7 +1,6 @@
 """Parent class for launching a membership inference attack on the output of a generative model"""
 import numpy as np
-from pandas import DataFrame, concat
-from pandas.api.types import CategoricalDtype
+import pandas as pd
 
 from sklearn.svm import SVC
 from sklearn.linear_model import LogisticRegression
@@ -96,7 +95,7 @@ class MIAttackClassifier(PrivacyAttack):
         if self.FeatureSet is not None:
             synT = np.stack([self.FeatureSet.extract(s) for s in synT])
         else:
-            if isinstance(synT[0], DataFrame):
+            if isinstance(synT[0], pd.DataFrame):
                 synT = np.stack([convert_df_to_array(s, self.metadata).flatten() for s in synT])
             else:
                 synT = np.stack([s.flatten() for s in synT])
@@ -168,7 +167,7 @@ class MIAttackClassifier(PrivacyAttack):
                             col['size'] += 1
 
                     if coltype == ORDINAL:
-                        cat = CategoricalDtype(categories=cdict['categories'], ordered=True)
+                        cat = pd.api.types.CategoricalDtype(categories=cdict['categories'], ordered=True)
                         colData = colData.astype(cat)
                         colArray = colData.cat.codes.values.reshape(-1, 1)
 
@@ -261,7 +260,7 @@ def generate_mia_shadow_data(GenModel, target, rawA, sizeRaw, sizeSyn, numModels
 
 def worker_train_shadow(rawA, train_index, GenModel, target, sizeSyn, numCopies, synA, labelsA):
     # Fit GM to data without target's data
-    if isinstance(rawA, DataFrame):
+    if isinstance(rawA, pd.DataFrame):
         rawAout = rawA.iloc[train_index]
     else:
         rawAout = rawA[train_index, :]
@@ -278,8 +277,8 @@ def worker_train_shadow(rawA, train_index, GenModel, target, sizeSyn, numCopies,
     labelsOut = [LABEL_OUT for _ in range(numCopies)]
 
     # Insert targets into training data
-    if isinstance(rawA, DataFrame):
-        rawAin = concat([rawAout, target], ignore_index=True)
+    if isinstance(rawA, pd.DataFrame):
+        rawAin = pd.concat([rawAout, target], ignore_index=True)
     else:
         if len(target.shape) == 1:
             target = target.reshape(1, len(target))
@@ -320,7 +319,7 @@ def generate_mia_anon_data(Sanitiser, target, rawA, sizeRaw, numSamples):
 
 def worker_sanitise_data(rawA, train_index, Sanitiser, target, sanA, labelsA):
     # Fit GM to data without target's data
-    if isinstance(rawA, DataFrame):
+    if isinstance(rawA, pd.DataFrame):
         rawAout = rawA.iloc[train_index]
     else:
         rawAout = rawA[train_index, :]
@@ -329,8 +328,8 @@ def worker_sanitise_data(rawA, train_index, Sanitiser, target, sanA, labelsA):
     labelsA.append(LABEL_OUT)
 
     # Insert targets into training data
-    if isinstance(rawA, DataFrame):
-        rawAin = concat(rawAout, target)
+    if isinstance(rawA, pd.DataFrame):
+        rawAin = pd.concat(rawAout, target)
     else:
         if len(target.shape) == 1:
             target = target.reshape(1, len(target))

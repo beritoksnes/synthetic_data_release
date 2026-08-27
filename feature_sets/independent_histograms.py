@@ -1,6 +1,5 @@
-from pandas import DataFrame
-from numpy import ndarray, array, linspace, all
-from pandas.api.types import CategoricalDtype
+import numpy as np
+import pandas as pd
 
 from feature_sets.feature_set import FeatureSet
 from utils.logging import LOGGER
@@ -12,7 +11,7 @@ filterwarnings('ignore', message=r"Parsing", category=FutureWarning)
 
 class HistogramFeatureSet(FeatureSet):
     def __init__(self, datatype, metadata, nbins=10, quids=None):
-        assert datatype in [DataFrame], 'Unknown data type {}'.format(datatype)
+        assert datatype in [pd.DataFrame], 'Unknown data type {}'.format(datatype)
         self.datatype = datatype
         self.nfeatures = 0
 
@@ -32,7 +31,7 @@ class HistogramFeatureSet(FeatureSet):
             if dtype == FLOAT or dtype == INTEGER:
                 if attr_name not in quids:
                     self.num_attributes.append(attr_name)
-                    self.histogram_bins[attr_name] = linspace(cdict['min'], cdict['max'], nbins+1)
+                    self.histogram_bins[attr_name] = np.linspace(cdict['min'], cdict['max'], nbins+1)
                     self.nfeatures += nbins
                 else:
                     self.cat_attributes.append(attr_name)
@@ -53,8 +52,8 @@ class HistogramFeatureSet(FeatureSet):
     def extract(self, data):
         assert isinstance(data, self.datatype), f'Feature extraction expects {self.datatype} as input type'
 
-        assert all([c in list(data) for c in self.cat_attributes]), 'Missing some categorical attributes in input data'
-        assert all([c in list(data) for c in self.num_attributes]), 'Missing some numerical attributes in input data'
+        assert np.all([c in list(data) for c in self.cat_attributes]), 'Missing some categorical attributes in input data'
+        assert np.all([c in list(data) for c in self.num_attributes]), 'Missing some numerical attributes in input data'
 
         features = []
         for attr in self.num_attributes:
@@ -64,13 +63,13 @@ class HistogramFeatureSet(FeatureSet):
 
         for attr in self.cat_attributes:
             col = data[attr]
-            col = col.astype(CategoricalDtype(categories=self.category_codes[attr], ordered=True))
+            col = col.astype(pd.api.types.CategoricalDtype(categories=self.category_codes[attr], ordered=True))
             F = col.value_counts().loc[self.category_codes[attr]].values
             features.extend(F.tolist())
 
         assert len(features) == self.nfeatures, f'Expected number of features is {self.nfeatures} but found {len(features)}'
 
-        return array(features)
+        return np.array(features)
 
     def _get_names(self):
         feature_names = []

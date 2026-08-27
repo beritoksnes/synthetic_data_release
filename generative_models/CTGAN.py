@@ -11,7 +11,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pandas import DataFrame
+import pandas as pd
 
 from utils.logging import LOGGER
 
@@ -39,7 +39,7 @@ class CTGAN(GenerativeModel):
         self.multiprocess = False
         self.batch_size = batch_size
         
-        self.datatype = DataFrame
+        self.datatype = pd.DataFrame
         self.infer_ranges = True
         self.trained = False
 

@@ -1,7 +1,7 @@
 """A set of features that a Bayesian Net model is expected to extract from the raw data"""
-from pandas import DataFrame, get_dummies
-from pandas.api.types import CategoricalDtype
-from numpy import ndarray, all, corrcoef, concatenate, nan_to_num, zeros_like, triu_indices_from
+import pandas as pd
+import numpy as np
+
 from itertools import combinations
 
 from utils.constants import *
@@ -12,7 +12,7 @@ from feature_sets.independent_histograms import HistogramFeatureSet
 
 class CorrelationsFeatureSet(FeatureSet):
     def __init__(self, datatype, metadata, quids=None):
-        assert datatype in [DataFrame, ndarray], 'Unknown data type {}'.format(datatype)
+        assert datatype in [pd.DataFrame, np.ndarray], 'Unknown data type {}'.format(datatype)
         self.datatype = datatype
         self.nfeatures = 0
 
@@ -50,22 +50,22 @@ class CorrelationsFeatureSet(FeatureSet):
     def extract(self, data, flatten=True):
         assert isinstance(data, self.datatype), f'Feature extraction expects {self.datatype} as input type'
 
-        assert all([c in list(data) for c in self.cat_attributes]), 'Missing some categorical attributes in input data'
-        assert all([c in list(data) for c in self.num_attributes]), 'Missing some numerical attributes in input data'
+        assert np.all([c in list(data) for c in self.cat_attributes]), 'Missing some categorical attributes in input data'
+        assert np.all([c in list(data) for c in self.num_attributes]), 'Missing some numerical attributes in input data'
 
         encoded = data[self.num_attributes].copy()
         for c in self.cat_attributes:
             col = data[c]
-            col = col.astype(CategoricalDtype(categories=self.category_codes[c], ordered=True))
-            encoded = encoded.merge(get_dummies(col, drop_first=True, prefix=c), left_index=True, right_index=True)
+            col = col.astype(pd.api.types.CategoricalDtype(categories=self.category_codes[c], ordered=True))
+            encoded = encoded.merge(pd.get_dummies(col, drop_first=True, prefix=c), left_index=True, right_index=True)
 
         col_names = list(encoded)
         self.feature_names = list(combinations(col_names, r=2))
 
         corr = encoded.corr().fillna(0).values
 
-        mask = zeros_like(corr).astype(bool)
-        mask[triu_indices_from(mask, k=1)] = True
+        mask = np.zeros_like(corr).astype(bool)
+        mask[np.triu_indices_from(mask, k=1)] = True
 
         if flatten:
             features = corr[mask].flatten()
@@ -77,7 +77,7 @@ class CorrelationsFeatureSet(FeatureSet):
 
 class BayesFeatureSet(FeatureSet):
     def __init__(self, datatype, metadata, nbins=10, quids=None):
-        assert datatype in [DataFrame, ndarray], 'Unknown data type {}'.format(datatype)
+        assert datatype in [pd.DataFrame, np.ndarray], 'Unknown data type {}'.format(datatype)
         self.datatype = datatype
 
         self.histograms  = HistogramFeatureSet(datatype, metadata, nbins, quids)
@@ -87,4 +87,4 @@ class BayesFeatureSet(FeatureSet):
         Hist = self.histograms.extract(data)
         Corr = self.correlations.extract(data)
 
-        return concatenate([Hist, Corr])
+        return np.concatenate([Hist, Corr])

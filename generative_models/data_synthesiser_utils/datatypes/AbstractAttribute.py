@@ -3,8 +3,7 @@ from bisect import bisect_right
 from random import uniform
 
 import numpy as np
-from numpy.random import choice
-from pandas import Series
+import pandas as pd
 
 from generative_models.data_synthesiser_utils.utils import normalize_given_distribution
 
@@ -82,7 +81,7 @@ class AbstractAttribute(object):
         """Sample an array of binning indices.
 
         """
-        return Series(choice(len(self.distribution_probabilities), size=n, p=self.distribution_probabilities))
+        return pd.Series(np.random.choice(len(self.distribution_probabilities), size=n, p=self.distribution_probabilities))
 
     @abstractmethod
     def sample_values_from_binning_indices(self, binning_indices):

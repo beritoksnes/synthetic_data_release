@@ -1,6 +1,6 @@
 """A template file for writing a simple test for a new attack model"""
 from unittest import TestCase
-from pandas import DataFrame
+import pandas as pd
 
 from warnings import filterwarnings
 filterwarnings('ignore')
@@ -26,7 +26,7 @@ class TestAttacks(TestCase):
         self.sizeS = int(len(self.raw)/2)
         self.GenModel = IndependentHistogram(self.metadata)
         self.San = SanitiserNHS(self.metadata)
-        self.FeatureSet = HistogramFeatureSet(DataFrame, metadata=self.metadata)
+        self.FeatureSet = HistogramFeatureSet(pd.DataFrame, metadata=self.metadata)
 
         self.target = self.raw.sample()
         self.shadowDataSyn = generate_mia_shadow_data(self.GenModel, self.target, self.raw, self.sizeS, self.sizeS, numModels=2, numCopies=2)

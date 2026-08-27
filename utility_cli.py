@@ -3,12 +3,11 @@ Command-line interface for running utility evaluation
 """
 
 import json
-
 from os import mkdir, path
-from numpy import mean
-from numpy.random import choice, seed
-from pandas import concat
 from argparse import ArgumentParser
+
+import numpy as np
+import pandas as pd
 
 from utils.datagen import load_s3_data_as_df, load_local_data_as_df
 from utils.utils import json_numpy_serialzer
@@ -20,7 +19,8 @@ from generative_models.data_synthesiser import (IndependentHistogram,
                                                 PrivBayes,
                                                 Cvine,
                                                 CvineSensitive,
-                                                IMRV)
+                                                IMRV,
+                                                CVCDA)
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
 from generative_models.pate_gan import PATEGAN
@@ -45,7 +45,7 @@ def main():
     argparser.add_argument('--outdir', '-O', default='outputs/test', type=str, help='Path relative to cwd for storing output files')
     args = argparser.parse_args()
 
-    seed(SEED)
+    np.random.seed(SEED)
     # Load runconfig
     with open(path.join(cwd, args.runconfig)) as f:
         runconfig = json.load(f)
@@ -75,7 +75,7 @@ def main():
     rawTest = rawPop.query(runconfig['dataFilter']['test'])
 
     # Pick targets
-    targetIDs = choice(list(rawTrain.index), size=runconfig['nTargets'], replace=False).tolist()
+    targetIDs = np.random.choice(list(rawTrain.index), size=runconfig['nTargets'], replace=False).tolist()
 
     # If specified: Add specific target records
     if runconfig['Targets'] is not None:
@@ -87,7 +87,7 @@ def main():
     rawTrainWoTargets = rawTrain.drop(targetIDs)
 
     # Get test target records
-    testRecordIDs = choice(list(rawTest.index), size=runconfig['nTargets'], replace=False).tolist()
+    testRecordIDs = np.random.choice(list(rawTest.index), size=runconfig['nTargets'], replace=False).tolist()
 
     # If specified: Add specific target records
     if runconfig['TestRecords'] is not None:
@@ -130,6 +130,9 @@ def main():
             elif gm == 'IMRV':
                 for params in paramsList:
                     gmList.append(IMRV(metadata, *params))
+            elif gm == 'CVCDA':
+                for params in paramsList:
+                    gmList.append(CVCDA(metadata, *params))
             else:
                 raise ValueError(f'Unknown GM {gm}')
 
@@ -172,7 +175,7 @@ def main():
     for nr in range(runconfig['nIter']):
         print(f'\n--- Game iteration {nr + 1} ---')
         # Draw a raw dataset
-        rIdx = choice(list(rawTrainWoTargets.index), size=runconfig['sizeRawT'], replace=False).tolist()
+        rIdx = np.random.choice(list(rawTrainWoTargets.index), size=runconfig['sizeRawT'], replace=False).tolist()
         rawTout = rawTrain.loc[rIdx]
 
         LOGGER.info('Start: Utility evaluation on Raw...')
@@ -189,16 +192,16 @@ def main():
 
             resultsTargetUtility[ut.__name__]['Raw'][nr]['OUT'] = {
                 'TestRecordID': testRecordIDs,
-                'Accuracy': list(mean(predErrorTargets, axis=0))
+                'Accuracy': list(np.mean(predErrorTargets, axis=0))
             }
 
             resultsAggUtility[ut.__name__]['Raw']['TargetID'].append('OUT')
-            resultsAggUtility[ut.__name__]['Raw']['Accuracy'].append(mean(predErrorAggr))
+            resultsAggUtility[ut.__name__]['Raw']['Accuracy'].append(np.mean(predErrorAggr))
 
         # Get utility from raw with each target
         for tid in targetIDs:
             target = targets.loc[[tid]]
-            rawIn = concat([rawTout, target], ignore_index=True)
+            rawIn = pd.concat([rawTout, target], ignore_index=True)
 
             for ut in utilityTasks:
                 predErrorTargets = []
@@ -210,11 +213,11 @@ def main():
 
                 resultsTargetUtility[ut.__name__]['Raw'][nr][tid] = {
                     'TestRecordID': testRecordIDs,
-                    'Accuracy': list(mean(predErrorTargets, axis=0))
+                    'Accuracy': list(np.mean(predErrorTargets, axis=0))
                 }
 
                 resultsAggUtility[ut.__name__]['Raw']['TargetID'].append(tid)
-                resultsAggUtility[ut.__name__]['Raw']['Accuracy'].append(mean(predErrorAggr))
+                resultsAggUtility[ut.__name__]['Raw']['Accuracy'].append(np.mean(predErrorAggr))
 
         LOGGER.info('Finished: Utility evaluation on Raw.')
 
@@ -236,17 +239,17 @@ def main():
 
                 resultsTargetUtility[ut.__name__][GenModel.__name__][nr]['OUT'] = {
                     'TestRecordID': testRecordIDs,
-                    'Accuracy': list(mean(predErrorTargets, axis=0))
+                    'Accuracy': list(np.mean(predErrorTargets, axis=0))
                 }
 
                 resultsAggUtility[ut.__name__][GenModel.__name__]['TargetID'].append('OUT')
-                resultsAggUtility[ut.__name__][GenModel.__name__]['Accuracy'].append(mean(predErrorAggr))
+                resultsAggUtility[ut.__name__][GenModel.__name__]['Accuracy'].append(np.mean(predErrorAggr))
 
             for tid in targetIDs:
                 LOGGER.info(f'Target: {tid}')
                 target = targets.loc[[tid]]
 
-                rawTin = concat([rawTout, target], ignore_index=True)
+                rawTin = pd.concat([rawTout, target], ignore_index=True)
                 GenModel.fit(rawTin)
                 synTwithTarget = [GenModel.generate_samples(runconfig['sizeSynT']) for _ in range(runconfig['nSynT'])]
 
@@ -261,11 +264,11 @@ def main():
 
                     resultsTargetUtility[ut.__name__][GenModel.__name__][nr][tid] = {
                         'TestRecordID': testRecordIDs,
-                        'Accuracy': list(mean(predErrorTargets, axis=0))
+                        'Accuracy': list(np.mean(predErrorTargets, axis=0))
                     }
 
                     resultsAggUtility[ut.__name__][GenModel.__name__]['TargetID'].append(tid)
-                    resultsAggUtility[ut.__name__][GenModel.__name__]['Accuracy'].append(mean(predErrorAggr))
+                    resultsAggUtility[ut.__name__][GenModel.__name__]['Accuracy'].append(np.mean(predErrorAggr))
 
             del synTwithoutTarget, synTwithTarget
 
@@ -287,17 +290,17 @@ def main():
 
                 resultsTargetUtility[ut.__name__][San.__name__][nr]['OUT'] = {
                     'TestRecordID': testRecordIDs,
-                    'Accuracy': list(mean(predErrorTargets, axis=0))
+                    'Accuracy': list(np.mean(predErrorTargets, axis=0))
                 }
 
                 resultsAggUtility[ut.__name__][San.__name__]['TargetID'].append('OUT')
-                resultsAggUtility[ut.__name__][San.__name__]['Accuracy'].append(mean(predErrorAggr))
+                resultsAggUtility[ut.__name__][San.__name__]['Accuracy'].append(np.mean(predErrorAggr))
 
             for tid in targetIDs:
                 LOGGER.info(f'Target: {tid}')
                 target = targets.loc[[tid]]
 
-                rawTin = concat([rawTout, target], ignore_index=True)
+                rawTin = pd.concat([rawTout, target], ignore_index=True)
                 sanIn = San.sanitise(rawTin)
 
                 for ut in utilityTasks:
@@ -310,11 +313,11 @@ def main():
 
                     resultsTargetUtility[ut.__name__][San.__name__][nr][tid] = {
                         'TestRecordID': testRecordIDs,
-                        'Accuracy': list(mean(predErrorTargets, axis=0))
+                        'Accuracy': list(np.mean(predErrorTargets, axis=0))
                     }
 
                     resultsAggUtility[ut.__name__][San.__name__]['TargetID'].append(tid)
-                    resultsAggUtility[ut.__name__][San.__name__]['Accuracy'].append(mean(predErrorAggr))
+                    resultsAggUtility[ut.__name__][San.__name__]['Accuracy'].append(np.mean(predErrorAggr))
 
             del sanOut, sanIn
 

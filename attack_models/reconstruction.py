@@ -1,6 +1,8 @@
 from os import path
-from pandas.api.types import CategoricalDtype
-from numpy import mean, concatenate, ones, sqrt, zeros, arange
+
+import pandas as pd
+import numpy as np
+
 from scipy.stats import norm
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression
@@ -130,7 +132,7 @@ class AttributeInferenceAttack(PrivacyAttack):
                             col['categories'].append(FILLNA_VALUE_CAT)
                             col['size'] += 1
 
-                    cat = CategoricalDtype(categories=cdict['categories'], ordered=True)
+                    cat = pd.api.types.CategoricalDtype(categories=cdict['categories'], ordered=True)
                     col_data = col_data.astype(cat)
                     dfcopy[col] = col_data.cat.codes
 
@@ -158,9 +160,9 @@ class AttributeInferenceAttack(PrivacyAttack):
         return dfImpute
 
     def _one_hot(self, col_data, categories):
-        col_data_onehot = zeros((len(col_data), len(categories)))
+        col_data_onehot = np.zeros((len(col_data), len(categories)))
         cidx = [categories.index(c) for c in col_data]
-        col_data_onehot[arange(len(col_data)), cidx] = 1
+        col_data_onehot[np.arange(len(col_data)), cidx] = 1
 
         return col_data_onehot
 
@@ -186,9 +188,9 @@ class LinRegAttack(AttributeInferenceAttack):
         n, k = features.shape
 
         # Center independent variables for better regression performance
-        self.scaleFactor = mean(features, axis=0)
+        self.scaleFactor = np.mean(features, axis=0)
         featuresScaled = features - self.scaleFactor
-        featuresScaled = concatenate([ones((n, 1)), featuresScaled], axis=1) # append all  ones for inclu intercept in beta vector
+        featuresScaled = np.concatenate([np.ones((n, 1)), featuresScaled], axis=1) # append all  ones for inclu intercept in beta vector
 
         # Get MLE for linear coefficients
         self.PredictionModel.fit(featuresScaled, labels)
@@ -201,7 +203,7 @@ class LinRegAttack(AttributeInferenceAttack):
     def _make_guess(self, targetAux):
         targetFeatures = self._encode_data(targetAux)
         targetFeaturesScaled = targetFeatures - self.scaleFactor
-        targetFeaturesScaled = concatenate([ones((len(targetFeaturesScaled), 1)), targetFeatures], axis=1)
+        targetFeaturesScaled = np.concatenate([np.ones((len(targetFeaturesScaled), 1)), targetFeatures], axis=1)
 
         guess = targetFeaturesScaled.dot(self.coefficients)[0]
 
@@ -212,7 +214,7 @@ class LinRegAttack(AttributeInferenceAttack):
 
         targetFeatures = self._encode_data(targetAux)
         targetFeaturesScaled = targetFeatures - self.scaleFactor
-        targetFeaturesScaled = concatenate([ones((len(targetFeaturesScaled), 1)), targetFeatures], axis=1)
+        targetFeaturesScaled = np.concatenate([np.ones((len(targetFeaturesScaled), 1)), targetFeatures], axis=1)
 
         if attemptLinkage:
             assert data is not None, "Need a dataset for linkage attack."
@@ -224,14 +226,14 @@ class LinRegAttack(AttributeInferenceAttack):
                     pCorrect = 1.
 
                 else:
-                    pdfLikelihood = norm(loc=targetFeaturesScaled.dot(self.coefficients), scale=sqrt(self.sigma))
+                    pdfLikelihood = norm(loc=targetFeaturesScaled.dot(self.coefficients), scale=np.sqrt(self.sigma))
                     pCorrect = pdfLikelihood.pdf(targetSensitive)[0]
 
             except:
-                pdfLikelihood = norm(loc=targetFeaturesScaled.dot(self.coefficients), scale=sqrt(self.sigma))
+                pdfLikelihood = norm(loc=targetFeaturesScaled.dot(self.coefficients), scale=np.sqrt(self.sigma))
                 pCorrect = pdfLikelihood.pdf(targetSensitive)[0]
         else:
-            pdfLikelihood = norm(loc=targetFeaturesScaled.dot(self.coefficients), scale=sqrt(self.sigma))
+            pdfLikelihood = norm(loc=targetFeaturesScaled.dot(self.coefficients), scale=np.sqrt(self.sigma))
             pCorrect = pdfLikelihood.pdf(targetSensitive)[0]
 
         return pCorrect
@@ -256,7 +258,7 @@ class RandForestAttack(AttributeInferenceAttack):
         labels = data[self.sensitiveAttribute].apply(lambda x: self.labels[x]).values
 
         # Feature normalisation
-        self.scaleFactor = mean(features, axis=0)
+        self.scaleFactor = np.mean(features, axis=0)
         featuresScaled = features - self.scaleFactor
 
         # Get MLE for linear coefficients

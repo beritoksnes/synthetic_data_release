@@ -9,7 +9,6 @@ import json
 import urllib
 from os import path
 from os import makedirs
-from pandas.api.types import CategoricalDtype
 
 from utils.constants import *
 
@@ -139,7 +138,7 @@ def convert_df_to_array(df, metadata):
                     if FILLNA_VALUE_CAT not in col['i2s']:
                         col['i2s'].append(FILLNA_VALUE_CAT)
                         col['size'] += 1
-                cat = CategoricalDtype(categories=col['i2s'], ordered=True)
+                cat = pandas.api.types.CategoricalDtype(categories=col['i2s'], ordered=True)
                 col_data = col_data.astype(cat)
                 dfcopy[col['name']] = col_data.cat.codes
 
@@ -156,7 +155,7 @@ def convert_series_to_array(scopy, metadata):
                     if FILLNA_VALUE_CAT not in col['i2s']:
                         col['i2s'].append(FILLNA_VALUE_CAT)
                         col['size'] += 1
-                cat = CategoricalDtype(categories=col['i2s'], ordered=True)
+                cat = pandas.api.types.CategoricalDtype(categories=col['i2s'], ordered=True)
                 scopy = scopy.astype(cat)
                 scopy = scopy.cat.codes
 

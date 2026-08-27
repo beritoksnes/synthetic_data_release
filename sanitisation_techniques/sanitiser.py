@@ -1,7 +1,6 @@
 """ Parent class for sanitisers """
-from pandas import DataFrame, cut
+import pandas as pd
 from sklearn.impute import SimpleImputer
-from pandas.api.types import is_numeric_dtype
 
 from utils.constants import *
 
@@ -20,7 +19,7 @@ class SanitiserNHS(Sanitiser):
                  drop_cols=None, quids=None):
 
         self.metadata = self._read_meta(metadata, drop_cols, quids)
-        self.datatype = DataFrame
+        self.datatype = pd.DataFrame
 
         self.histogram_size = nbins
         self.unique_threshold = thresh_rare
@@ -39,10 +38,10 @@ class SanitiserNHS(Sanitiser):
         """
         Sanitise a sensitive dataset
 
-        :param data: DataFrame: Sensitive raw dataset
-        :return: san_data: DataFrame: Sanitised dataset
+        :param data: pd.DataFrame: Sensitive raw dataset
+        :return: san_data: pd.DataFrame: Sanitised dataset
         """
-        san_data = DataFrame(index=data.index)
+        san_data = pd.DataFrame(index=data.index)
         data = self._impute_missing_values(data)
         drop_records = []
 
@@ -59,9 +58,9 @@ class SanitiserNHS(Sanitiser):
                 col_data.loc[idx] = int(cap)
 
             elif coltype == CATEGORICAL or coltype == ORDINAL:
-                if is_numeric_dtype(col_data):
+                if pd.api.types.is_numeric_dtype(col_data):
                     # Bins numerical cols marked as quid into specified bins
-                    col_data = cut(col_data, bins=cdict['bins'], labels=cdict['categories'])
+                    col_data = pd.cut(col_data, bins=cdict['bins'], labels=cdict['categories'])
                     col_data = col_data.astype(str)
 
                 # Remove any records with rare categories
