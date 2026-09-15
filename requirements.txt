@@ -8,6 +8,8 @@ scikit-learn~=1.4.0
 matplotlib~=3.9.0
 seaborn~=0.13.0
 plotly~=6.0.0
+palettable~=3.3.3
+husl~=4.0.3
 
 # Synthetic data / SDV ecosystem
 sdv~=1.37.0

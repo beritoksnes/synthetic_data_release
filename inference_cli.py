@@ -24,7 +24,6 @@ from generative_models.data_synthesiser import (IndependentHistogram,
                                                 CvineSensitive,
                                                 IMRV,
                                                 CVCDA)
-from generative_models.pate_gan import PATEGAN
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
 from generative_models.PRIVPGD import PrivPGD

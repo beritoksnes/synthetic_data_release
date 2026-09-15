@@ -461,80 +461,117 @@ class DataDescriber(object):
 class Cvine(GenerativeModel):
     def __init__(self, 
                  metadata, 
-                 family_set = "all", 
-                 trunc_lvl = None, 
+                 family_set = "all",
+                 rho = 0.6,
+                 response = "Y",
                  histogram_bins = 45, 
                  infer_ranges = False, 
                  multiprocess = True):
         self.metadata = self._read_meta(metadata)
         self.histogram_bins = histogram_bins
         self.family_set = family_set
+        self.rho = rho
+        self.response = response
 
         self.d = len(metadata['columns'])
-        self.trunc_lvl = trunc_lvl if trunc_lvl is not None else self.d - 1  
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
 
         self.datatype = pd.DataFrame
-        self.__name__ = f'Cvine({self.trunc_lvl})'
+        self.__name__ = f'Cvine'
         self.DataDescriber = None
         self.trained = False
 
         self.multiprocess = bool(multiprocess)
         self.infer_ranges = bool(infer_ranges)
+
+
+    def _algo1(self, real_data, sa, response, rho):
+        """Order columns in dataset according to Algorithm 1 in TVineSynth (Griesbauer et al., 2025).
+
+        Args:
+            real_data (pd.DataFrame): Input dataframe.
+            sa (list[str]): Names of sensitive attributes.
+            response (str): Name of the response column.
+            rho (float): Threshold on absolute pairwise association, a value between 0 and 1.
         
-    def fit(self, data):
+        Returns:
+            List with new order of columns in input dataframe.
+        """
+        d = real_data.shape[1]
+        attributes = np.setdiff1d(real_data.columns, response)
+        non_sa = np.setdiff1d(attributes, sa)
+        
+        # Compute pairwise associations with sensitive attributes
+        pa = real_data.corr(method="kendall").abs().loc[sa, non_sa]
+        
+        # Identify attributes with strong pairwise association with sensitive attributes
+        K = non_sa[(pa > rho).any(axis=0)]
+        K_sorted = K[np.argsort(-pa.loc[:,K].max().values)]
+        
+        # Define new order
+        O_star = np.concatenate([sa, 
+                                K_sorted, 
+                                np.setdiff1d(non_sa, K_sorted),
+                                [response]])
+
+        return(O_star)
+
+        
+    def fit(self, data, sensitive):
         """Fit C-vine model using pyvibecopulib library"""
         if self.trained:
             self.trained = False
             self.DataDescriber = None
 
+        # Prep data and reorder columns according to Algorithm 1
         self.DataDescriber = DataDescriber(self.metadata, self.histogram_bins, self.infer_ranges)
         self.DataDescriber.describe(data)
         data = pd.DataFrame(data)
-        
+        O_star = self._algo1(real_data=data, sa=sensitive, response=self.response, rho=self.rho)
+        data = data.loc[:,O_star]
         self.real_data = data
         n = data.shape[0]
         
-        # transform data to unit cube
+        # Transform data to unit cube
         u_data = []
         for i in range(self.d):
             if self.var_types[i] == "c":
                 u_data.append(scipy.stats.rankdata(data.iloc[:,i]))
             else:
-                u_data.append(scipy.stats.rankdata(data.iloc[:,i], method = "max"))
-                
+                u_data.append(scipy.stats.rankdata(data.iloc[:,i], method = "max"))      
         for i in range(self.d):
             if self.var_types[i] == "d":
                 u_data.append(scipy.stats.rankdata(data.iloc[:,i], method = "min") - 1) 
             else:
                 pass
-        
         u_data = np.array(u_data).transpose() * 1/(n+1)
-
-        # set vine tree structure
-        structure = pv.CVineStructure(order = range(1,self.d+1,1), trunc_lvl = self.trunc_lvl)      
         
-        # set controls        
+        # Set controls
+        structure = pv.CVineStructure(order = range(1,self.d+1,1)) 
         family_set_dict = {"all":pv.all,
                            "parametric":pv.parametric,
                            "one_par":pv.one_par,
                            "two_par":pv.two_par,
                            "three_par":pv.three_par,
                            "nonparametric":pv.nonparametric}
-        
-        controls = pv.FitControlsVinecop(family_set=family_set_dict[self.family_set], 
-                                         trunc_lvl=self.trunc_lvl)
+        controls = pv.FitControlsVinecop(family_set=family_set_dict[self.family_set])
 
-        # fit C-vine
-        self.vine = pv.Vinecop(d=self.d).from_data(data = u_data,
-                                                   structure = structure,
-                                                   var_types = self.var_types,
-                                                   controls = controls)
+        # Fit C-vine
+        vc = pv.Vinecop(d=self.d).from_data(data = u_data,
+                                            structure = structure,
+                                            var_types = self.var_types,
+                                            controls = controls)
+        self.structure = structure
+        self.pair_copulas = vc.pair_copulas
     
     
-    def generate_samples(self, nsamples):
-            """Generate samples from fitted C-vine model"""
-            u_synth = pv.Vinecop.simulate(self.vine, n=nsamples)            
+    def generate_samples(self, nsamples, trunc_lvl):
+            """Generate samples from fitted C-vine model with given truncation level"""
+            vc = pv.Vinecop(d=self.d).from_structure(structure=self.structure, 
+                                                     pair_copulas=self.pair_copulas,
+                                                     var_types=self.var_types)
+            vc.truncate(trunc_lvl)
+            u_synth = pv.Vinecop.simulate(vc, n=nsamples)            
 
             synth_data = []
             for i in range(self.d):
@@ -588,9 +625,7 @@ class CvineSensitive(GenerativeModel):
     def __init__(self, 
                  metadata, 
                  family_set = "parametric",
-                 sensitive = None,
                  lmbda = 0,
-                 trunc_lvl = None, 
                  histogram_bins = 45, 
                  infer_ranges = False, 
                  multiprocess = True):
@@ -608,22 +643,20 @@ class CvineSensitive(GenerativeModel):
         """
         self.metadata = self._read_meta(metadata)
         self.family_set = family_set
-        self.sensitive = sensitive
         self.lmbda = lmbda 
         self.histogram_bins = histogram_bins
         self.multiprocess = bool(multiprocess)
         self.infer_ranges = bool(infer_ranges)
 
         self.d = len(metadata['columns'])
-        self.trunc_lvl = trunc_lvl if trunc_lvl is not None else self.d - 1
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
 
         self.datatype = pd.DataFrame
-        self.__name__ = f'CvineSensitive({self.lmbda}, {self.trunc_lvl})'
+        self.__name__ = f'CvineSensitive({self.lmbda})'
         self.DataDescriber = None
         self.trained = False
 
-    def fit(self, data):
+    def fit(self, data, sensitive):
         """Fit model..."""
         LOGGER.debug(f'Start fitting CVineSensitive({self.lmbda}) model to data of shape {data.shape}...')
 
@@ -640,8 +673,7 @@ class CvineSensitive(GenerativeModel):
             # Export parameters to temporary json file
             params = {"var_types":self.var_types,
                       "family_set":self.family_set,
-                      "trunc_lvl":self.trunc_lvl,
-                      "sensitive":self.sensitive,
+                      "sensitive":sensitive,
                       "lmbda":self.lmbda}
             params_path.write_text(json.dumps(params))
     
@@ -660,14 +692,21 @@ class CvineSensitive(GenerativeModel):
                     f"stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
                 )
                   
-            self.vc = pv.Vinecop(d=self.d).from_json(model_path.read_text(encoding="utf-8"))
+            vc = pv.Vinecop(d=self.d).from_json(model_path.read_text(encoding="utf-8"))
+            
+            self.structure = vc.structure
+            self.pair_copulas = vc.pair_copulas
     
         LOGGER.debug(f'Finished fitting CVineSensitive({self.lmbda})')
         self.trained = True
 
-    def generate_samples(self, nsamples):
+    def generate_samples(self, nsamples, trunc_lvl):
         """Generate samples from fitted C-vine model"""
-        u_synth = pv.Vinecop.simulate(self.vc, n=nsamples)
+        vc = pv.Vinecop(d=self.d).from_structure(structure=self.structure, 
+                                                 pair_copulas=self.pair_copulas,
+                                                 var_types=self.var_types)
+        vc.truncate(trunc_lvl)
+        u_synth = pv.Vinecop.simulate(vc, n=nsamples)
                 
         synth_data = []
         for i in range(self.d):
@@ -719,9 +758,7 @@ class IMRV(GenerativeModel):
     def __init__(self,
                  metadata,
                  family_set = "parametric",
-                 sensitive = None,
                  weight = 0,
-                 trunc_lvl = None,
                  histogram_bins = 45,
                  infer_ranges = False,
                  multiprocess = True):
@@ -739,33 +776,31 @@ class IMRV(GenerativeModel):
         """
         self.metadata = self._read_meta(metadata)
         self.family_set = family_set
-        self.sensitive = sensitive
         self.weight = weight 
         self.histogram_bins = histogram_bins
         self.multiprocess = bool(multiprocess)
         self.infer_ranges = bool(infer_ranges)
         
         self.d = len(metadata['columns'])
-        self.trunc_lvl = trunc_lvl if trunc_lvl is not None else self.d - 1
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
         
         self.datatype = pd.DataFrame
-        self.__name__ = f'IMRV({self.weight}, {self.trunc_lvl})'
+        self.__name__ = f'IMRV({self.weight})'
         self.DataDescriber = None
         self.trained = False
 
-    def fit(self, data):
+    def fit(self, data, sensitive):
         n = data.shape[0]
         # Store real data for transformation of margins in generate_sampels function
         self.real_data = data
 
         # Get columns indices of sensitive variables
-        if len(set(self.sensitive).intersection(data.columns)) != len(self.sensitive):
+        if len(set(sensitive).intersection(data.columns)) != len(sensitive):
                     raise ValueError("Sensitive variables must be in data frame")
         
         sensitive_ind = []
-        if self.sensitive is not None:
-            sensitive_ind = [j+1 for j in range(self.d) if data.columns[j] in self.sensitive]
+        if sensitive is not None:
+            sensitive_ind = [j+1 for j in range(self.d) if data.columns[j] in sensitive]
 
         # Compute pseudo-observations     
         u_data = []
@@ -791,14 +826,16 @@ class IMRV(GenerativeModel):
                            "three_par":pv.three_par, 
                            "nonparametric":pv.nonparametric}
 
-        controls = pv.FitControlsVinecop(family_set=family_set_dict[self.family_set], trunc_lvl=self.trunc_lvl)
+        controls = pv.FitControlsVinecop(family_set=family_set_dict[self.family_set])
         
         # Fit vine copula model to data
-        self.vc0 = pv.Vinecop(d=self.d).from_data(u_data, controls=controls, var_types=self.var_types)
+        vc0 = pv.Vinecop(d=self.d).from_data(u_data, controls=controls, var_types=self.var_types)
+        pair_copulas0 = vc0.pair_copulas
 
         # Define independence mixture component
-        M = self.vc0.structure.matrix
-        pair_copulas1 = self.vc0.pair_copulas
+        structure = vc0.structure
+        M = structure.matrix
+        pair_copulas1 = vc0.pair_copulas
 
         for j in range(self.d-1):
             for k in range(self.d-j-1):
@@ -806,20 +843,31 @@ class IMRV(GenerativeModel):
                 sensitive_dep = (conditioned[0] in sensitive_ind) or (conditioned[1] in sensitive_ind)
                 if sensitive_dep: # Replace "sensitive" pair copula with independence pair copula
                     pair_copulas1[j][k] = pv.Bicop(pv.indep)
+        
+        # Store components
+        self.structure = structure
+        self.pair_copulas0 = pair_copulas0
+        self.pair_copulas1 = pair_copulas1
 
-        self.vc1 = pv.Vinecop(d=self.d).from_structure(structure=self.vc0.structure, 
-                                                       pair_copulas=pair_copulas1, 
-                                                       var_types=self.vc0.var_types)
-
-    def generate_samples(self, nsamples):
+    def generate_samples(self, nsamples, trunc_lvl):
+        vc0 = pv.Vinecop(d=self.d).from_structure(structure=self.structure, 
+                                                  pair_copulas=self.pair_copulas0, 
+                                                  var_types=self.var_types)
+        vc0.truncate(trunc_lvl)
+        
+        vc1 = pv.Vinecop(d=self.d).from_structure(structure=self.structure, 
+                                                  pair_copulas=self.pair_copulas1,
+                                                  var_types=self.var_types)
+        vc1.truncate(trunc_lvl)
+        
         # Sample latent variables
         c = np.random.choice([0,1], size=nsamples, replace=True, p=[1-self.weight,self.weight])
         n1, n0 = c.sum(), nsamples - c.sum()
 
         # Simulate from fitted vines conditional on latent variables
         u_synth = np.zeros((nsamples, self.d))
-        u_synth[c==0,] = self.vc0.simulate(n0)
-        u_synth[c==1,] = self.vc1.simulate(n1)
+        u_synth[c==0,] = vc0.simulate(n0)
+        u_synth[c==1,] = vc1.simulate(n1)
 
         # Back-transform margins
         synth_data = []
@@ -871,8 +919,9 @@ class IMRV(GenerativeModel):
 class CVCDA(GenerativeModel):
     def __init__(self, 
                  metadata, 
-                 family_set = "all", 
-                 trunc_lvl = None,
+                 family_set = "all",
+                 rho=0.6,
+                 response="Y",
                  histogram_bins = 45,
                  infer_ranges = False,
                  multiprocess = True):
@@ -880,29 +929,67 @@ class CVCDA(GenerativeModel):
 
         self.metadata = self._read_meta(metadata)
         self.family_set = family_set
+        self.rho = rho
+        self.response = response
         self.histogram_bins = histogram_bins
         self.multiprocess = bool(multiprocess)
         self.infer_ranges = bool(infer_ranges)
         
         self.d = len(metadata['columns'])
-        self.trunc_lvl = trunc_lvl if trunc_lvl is not None else self.d - 1
         self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
         
         self.datatype = pd.DataFrame
-        self.__name__ = f'CVCDA({self.trunc_lvl})'
+        self.__name__ = f'CVCDA'
         self.DataDescriber = None
         self.trained = False
+    
+    def _algo1(self, real_data, sa, response, rho):
+            """Order columns in dataset according to Algorithm 1 in TVineSynth (Griesbauer et al., 2025).
+    
+            Args:
+                real_data (pd.DataFrame): Input dataframe.
+                sa (list[str]): Names of sensitive attributes.
+                response (str): Name of the response column.
+                rho (float): Threshold on absolute pairwise association, a value between 0 and 1.
+            
+            Returns:
+                List with new order of columns in input dataframe.
+            """
+            d = real_data.shape[1]
+            attributes = np.setdiff1d(real_data.columns, response)
+            non_sa = np.setdiff1d(attributes, sa)
+            
+            # Compute pairwise associations with sensitive attributes
+            pa = real_data.corr(method="kendall").abs().loc[sa, non_sa]
+            
+            # Identify attributes with strong pairwise association with sensitive attributes
+            K = non_sa[(pa > rho).any(axis=0)]
+            K_sorted = K[np.argsort(-pa.loc[:,K].max().values)]
+            
+            # Define new order
+            O_star = np.concatenate([sa, 
+                                    K_sorted, 
+                                    np.setdiff1d(non_sa, K_sorted),
+                                    [response]])
+    
+            return(O_star)
 
-    def fit(self, data):
+    def fit(self, data, sensitive):
         """Fit separate C-vine copula models for each class"""
-        LOGGER.debug(f'Start fitting CVCDA({self.trunc_lvl}) model to data of shape {data.shape}...')
-        self.real_data = data
+        LOGGER.debug(f'Start fitting CVCDA model to data of shape {data.shape}...')
 
         # Data prep
+        n = data.shape[0]
         p = data.shape[1] - 1
+        
         y = data['Y'].astype("int")
+        O_star = self._algo1(real_data=data, sa=sensitive, response=self.response, rho=self.rho)
+        data = data.loc[:,O_star]
+        
         n = [data.shape[0]-y.sum(), y.sum()]
         self.pi_Y = y.mean()
+        
+        self.real_data = data
 
         # Compute pseudo-observations     
         u_data = []
@@ -930,26 +1017,41 @@ class CVCDA(GenerativeModel):
                             "three_par":pv.three_par,
                             "nonparametric":pv.nonparametric}
         
-        controls = pv.FitControlsVinecop(family_set=family_set_dict[self.family_set], trunc_lvl=self.trunc_lvl)
+        controls = pv.FitControlsVinecop(family_set=family_set_dict[self.family_set])
 
         # Fit vine copula models
-        self.vc0 = pv.Vinecop(d=p).from_data(u_data[0],
-                                             structure = pv.CVineStructure(range(1,p+1)),
-                                             controls = controls,
-                                             var_types = self.var_types[:-1],)
-        self.vc1 = pv.Vinecop(d=p).from_data(u_data[1],
-                                             structure = pv.CVineStructure(range(1,p+1)),
-                                             controls = controls,
-                                             var_types = self.var_types[:-1],)
+        vc0 = pv.Vinecop(d=p).from_data(u_data[0], 
+                                        structure = pv.CVineStructure(range(1,p+1)),
+                                        controls = controls,
+                                        var_types = self.var_types[:-1])
+        vc1 = pv.Vinecop(d=p).from_data(u_data[1],
+                                        structure = pv.CVineStructure(range(1,p+1)),
+                                        controls = controls,
+                                        var_types = self.var_types[:-1])
+        
+        # Store components
+        self.structure0 = vc0.structure
+        self.pair_copulas0 = vc0.pair_copulas
+        self.structure1 = vc1.structure
+        self.pair_copulas1 = vc1.pair_copulas
 
-        LOGGER.debug(f'Finished fitting CVCDA({self.trunc_lvl})')
+        LOGGER.debug(f'Finished fitting CVCDA')
         self.trained = True
     
-    def generate_samples(self, nsamples):
+    def generate_samples(self, nsamples, trunc_lvl):
         """Generate samples from fitted C-vine models"""
+        vc0 = pv.Vinecop(d=self.d).from_structure(structure=self.structure0,
+                                                  pair_copulas=self.pair_copulas0,
+                                                  var_types=self.var_types[:-1])
+        vc1 = pv.Vinecop(d=self.d).from_structure(structure=self.structure1,
+                                                  pair_copulas=self.pair_copulas1,
+                                                  var_types=self.var_types[:-1])
+        vc0.truncate(trunc_lvl)
+        vc1.truncate(trunc_lvl)
+        vc = [vc0, vc1]
+        
         y_synth = np.random.choice([0,1], nsamples, replace=True, p=[1-self.pi_Y, self.pi_Y])
         n = [nsamples-y_synth.sum(), y_synth.sum()]
-        vc = [self.vc0, self.vc1]
 
         data_synth = pd.DataFrame(data=np.zeros((nsamples, self.d-1)),
                                   columns=self.real_data.columns[:-1])
@@ -969,7 +1071,7 @@ class CVCDA(GenerativeModel):
                 
         data_synth["Y"] = y_synth
         data_synth["Y"] = data_synth["Y"].map({0:'0', 1:'1'})
-        
+
         convert_dict = {col: object if dtype == 'd' else float for col, dtype in zip(data_synth.columns, self.var_types)}
         data_synth = data_synth.astype(convert_dict)
         

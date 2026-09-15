@@ -23,7 +23,6 @@ from generative_models.data_synthesiser import (IndependentHistogram,
                                                 CVCDA)
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
-from generative_models.pate_gan import PATEGAN
 from generative_models.PRIVPGD import PrivPGD
 from predictive_models.predictive_model import RandForestClassTask, LogRegClassTask, LinRegTask
 

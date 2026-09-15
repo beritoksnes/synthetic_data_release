@@ -23,7 +23,6 @@ from sanitisation_techniques.sanitiser import SanitiserNHS
 
 from generative_models.CTGAN import CTGAN
 from generative_models.TVAE import TVAE
-from generative_models.pate_gan import PATEGAN
 from generative_models.PRIVPGD import PrivPGD
 from generative_models.data_synthesiser import (IndependentHistogram,
                                                 BayesianNet,
@@ -169,10 +168,7 @@ def main():
             sanA, labelsA = generate_mia_anon_data(San, target, rawA, runconfig['sizeRawT'], runconfig['nShadows'] * runconfig['nSynA'])
 
             # Train attack on shadow data
-            for Feature in [NaiveFeatureSet(pd.DataFrame),
-                            HistogramFeatureSet(pd.DataFrame, metadata, nbins=San.histogram_size, quids=San.quids),
-                            CorrelationsFeatureSet(pd.DataFrame, metadata, quids=San.quids),
-                            EnsembleFeatureSet(pd.DataFrame, metadata, nbins=San.histogram_size, quasi_id_cols=San.quids)]:
+            for Feature in [CorrelationsFeatureSet(pd.DataFrame, metadata, quids=San.quids)]:
 
                 Attack = MIAttackClassifierRandomForest(metadata=metadata, FeatureSet=Feature, quids=San.quids)
                 Attack.train(sanA, labelsA)
@@ -192,7 +188,7 @@ def main():
             synA, labelsSA = generate_mia_shadow_data(GenModel, target, rawA, runconfig['sizeRawT'], runconfig['sizeSynT'], runconfig['nShadows'], runconfig['nSynA'])
 
             # Train attack on shadow data
-            for Feature in [NaiveFeatureSet(GenModel.datatype), HistogramFeatureSet(GenModel.datatype, metadata), CorrelationsFeatureSet(GenModel.datatype, metadata)]:
+            for Feature in [CorrelationsFeatureSet(GenModel.datatype, metadata)]:
                 Attack  = MIAttackClassifierRandomForest(metadata, Feature)
                 Attack.train(synA, labelsSA)
                 attacks[tid][GenModel.__name__][f'{Feature.__name__}'] = Attack

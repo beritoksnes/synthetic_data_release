@@ -21,7 +21,6 @@ from loguru import logger
 from generative_models.CTGAN import CTGAN
 from generative_models.data_synthesiser import (
     IndependentHistogram, BayesianNet, PrivBayes)
-from generative_models.pate_gan import PATEGAN
 from utils.datagen import load_s3_data_as_df, load_local_data_as_df
 
 
