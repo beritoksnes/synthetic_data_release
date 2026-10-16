@@ -1099,3 +1099,165 @@ class CVCDA(GenerativeModel):
                 raise ValueError(f'Unknown data type {coltype} for attribute {col}')
     
         return metadict
+
+class CVCDASensitive(GenerativeModel):
+    """A C-vine copula discriminant analysis model putting penalties on sensitive parameters during estimation"""
+    def __init__(self, 
+                 metadata, 
+                 family_set = "parametric",
+                 lmbda = 0,
+                 histogram_bins = 45, 
+                 infer_ranges = False, 
+                 multiprocess = True):
+        
+        self.metadata = self._read_meta(metadata)
+        self.family_set = family_set
+        self.lmbda = lmbda 
+        self.histogram_bins = histogram_bins
+        self.multiprocess = bool(multiprocess)
+        self.infer_ranges = bool(infer_ranges)
+
+        self.d = len(metadata['columns'])
+        self.var_types = ['c' if metadata['columns'][i]['type'] == 'Float' else 'd' for i in range(self.d)]
+
+        self.datatype = pd.DataFrame
+        self.__name__ = f'CVCDASensitive'
+        self.DataDescriber = None
+        self.trained = False
+
+    def fit(self, data, sensitive):
+        """Fit model..."""
+        LOGGER.debug(f'Start fitting CVCDASensitive({self.lmbda}) model to data of shape {data.shape}...')
+
+        data.rename(columns={data.columns[-1]: "Y"}, inplace=True)
+        self.real_data = data
+        self.pi_Y = data.loc[:,"Y"].astype("int").mean()
+        data0 = data.loc[data.iloc[:,self.d-1].astype("int")==0, data.columns[:(self.d-1)]]
+        data1 = data.loc[data.iloc[:,self.d-1].astype("int")==1, data.columns[:(self.d-1)]]
+        
+        # Fit model by calling R-script (add more documentation ASAP)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            d0_path, d1_path, params_path, m0_path, m1_path = tmp / "data0.csv", tmp / "data1.csv", tmp / "params.json", tmp / "m0.json", tmp / "m1.json"
+    
+            # Export data to temporary csv files
+            data0.to_csv(d0_path, index=False)
+            data1.to_csv(d1_path, index=False)
+    
+            # Export parameters to temporary json file
+            params = {"var_types":self.var_types[:-1],
+                      "family_set":self.family_set,
+                      "sensitive":sensitive,
+                      "lmbda":self.lmbda}
+            params_path.write_text(json.dumps(params))
+    
+            # Run R code
+
+            # Class 0
+            cmd0 = ["Rscript",
+                    CVINE_SENSITIVE_SCRIPT,
+                    d0_path,
+                    params_path,
+                    m0_path]
+    
+            result0 = subprocess.run(cmd0, capture_output=True)
+    
+            if result0.returncode != 0:
+                raise RuntimeError(
+                    f"R estimation failed for class 0 (exit {result0.returncode}).\n"
+                    f"stderr:\n{result0.stderr}\nstdout:\n{result0.stdout}"
+                )
+                  
+            vc0 = pv.Vinecop(d=self.d).from_json(m0_path.read_text(encoding="utf-8"))
+
+            # Class 1
+            cmd1 = ["Rscript",
+                    CVINE_SENSITIVE_SCRIPT,
+                    d1_path,
+                    params_path,
+                    m1_path]
+                
+            result1 = subprocess.run(cmd1, capture_output=True)
+                
+            if result1.returncode != 0:
+                raise RuntimeError(
+                    f"R estimation failed for class 1 (exit {result1.returncode}).\n"
+                    f"stderr:\n{result1.stderr}\nstdout:\n{result1.stdout}"
+                    )
+                              
+            vc1 = pv.Vinecop(d=self.d).from_json(m1_path.read_text(encoding="utf-8"))
+            
+            # Store components
+            self.structure0 = vc0.structure
+            self.pair_copulas0 = vc0.pair_copulas
+            self.structure1 = vc1.structure
+            self.pair_copulas1 = vc1.pair_copulas
+    
+        LOGGER.debug(f'Finished fitting CVineSensitive({self.lmbda})')
+        self.trained = True
+
+    def generate_samples(self, nsamples, trunc_lvl):
+        """Generate samples from fitted C-vine models"""
+        vc0 = pv.Vinecop(d=self.d).from_structure(structure=self.structure0,
+                                                  pair_copulas=self.pair_copulas0,
+                                                  var_types=self.var_types[:-1])
+        vc1 = pv.Vinecop(d=self.d).from_structure(structure=self.structure1,
+                                                  pair_copulas=self.pair_copulas1,
+                                                  var_types=self.var_types[:-1])
+        vc0.truncate(trunc_lvl)
+        vc1.truncate(trunc_lvl)
+        vc = [vc0, vc1]
+            
+        y_synth = np.random.choice([0,1], nsamples, replace=True, p=[1-self.pi_Y, self.pi_Y])
+        n = [nsamples-y_synth.sum(), y_synth.sum()]
+    
+        data_synth = pd.DataFrame(data=np.zeros((nsamples, self.d-1)),
+                                  columns=self.real_data.columns[:-1])
+            
+        for k in [0,1]:
+            u_synth = vc[k].simulate(n[k])
+            for j in range(self.d-1):
+                if self.var_types[j] == "c":
+                    s = np.quantile(a = self.real_data.loc[self.real_data["Y"]==str(k), self.real_data.columns[j]], 
+                                    q = u_synth[:,j], 
+                                    method = 'median_unbiased')
+                else: 
+                    s = np.quantile(a=self.real_data.loc[self.real_data["Y"]==str(k), self.real_data.columns[j]],
+                                    q = u_synth[:,j], 
+                                    method = 'closest_observation')
+                data_synth.loc[y_synth==k, data_synth.columns[j]] = s
+                    
+        data_synth["Y"] = y_synth
+        data_synth["Y"] = data_synth["Y"].map({0:'0', 1:'1'})
+    
+        convert_dict = {col: object if dtype == 'd' else float for col, dtype in zip(data_synth.columns, self.var_types)}
+        data_synth = data_synth.astype(convert_dict)
+            
+        return data_synth
+
+    def _read_meta(self, metadata):
+        """ Read metadata from metadata file."""
+        metadict = {}
+
+        for cdict in metadata['columns']:
+            col = cdict['name']
+            coltype = cdict['type']
+
+            if coltype == FLOAT or coltype == INTEGER:
+                metadict[col] = {
+                    'type': coltype,
+                    'min': cdict['min'],
+                    'max': cdict['max']
+                }
+
+            elif coltype == CATEGORICAL or coltype == ORDINAL:
+                metadict[col] = {
+                    'type': coltype,
+                    'categories': cdict['i2s'],
+                    'size': len(cdict['i2s'])
+                }
+
+            else:
+                raise ValueError(f'Unknown data type {coltype} for attribute {col}')
+
+        return metadict

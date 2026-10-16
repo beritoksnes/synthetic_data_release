@@ -9,6 +9,7 @@
   "alpha": 0.126,
   "truncLevels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
   "generativeModels": {
+    "CVCDASensitive": [["all", 5]],
     "CVCDA": [["all"]],
     "IMRV": [["all", 0.25],
              ["all", 0.5],

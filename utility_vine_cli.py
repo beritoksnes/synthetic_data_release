@@ -14,17 +14,12 @@ from utils.datagen import load_s3_data_as_df, load_local_data_as_df
 from utils.utils import json_numpy_serialzer
 from utils.logging import LOGGER
 
-from sanitisation_techniques.sanitiser import SanitiserNHS
-from generative_models.data_synthesiser import (IndependentHistogram,
-                                                BayesianNet,
-                                                PrivBayes,
-                                                Cvine,
+from generative_models.data_synthesiser import (Cvine,
                                                 CvineSensitive,
                                                 IMRV,
-                                                CVCDA)
-from generative_models.CTGAN import CTGAN
-from generative_models.TVAE import TVAE
-from generative_models.PRIVPGD import PrivPGD
+                                                CVCDA,
+                                                CVCDASensitive)
+
 from predictive_models.predictive_model import RandForestClassTask, LogRegClassTask, LinRegTask
 
 from warnings import simplefilter
@@ -92,6 +87,9 @@ def main():
             elif gm == 'CVCDA':
                 for params in paramsList:
                     gmList.append(CVCDA(metadata, *params))
+            elif gm == 'CVCDASensitive':
+                for params in paramsList:
+                    gmList.append(CVCDASensitive(metadata, *params))
             else:
                 raise ValueError(f'Generative model {gm} is not an implemented vine copula model')
 
