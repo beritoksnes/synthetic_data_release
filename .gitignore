@@ -16,3 +16,4 @@ paper/*.blg
 paper/*.out
 syn_data_files/
 notebooks_local/
+*.csv
